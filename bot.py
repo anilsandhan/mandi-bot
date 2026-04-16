@@ -215,6 +215,23 @@ def is_greeting(text):
     return text.lower().strip() in GREETINGS
 
 
+def is_valid_name(text):
+    """Rejects greetings, commands, numbers as names"""
+    t = text.strip()
+    if len(t) < 2:
+        return False
+    if t.lower() in GREETINGS:
+        return False
+    if t.startswith("/"):
+        return False
+    if t.isdigit():
+        return False
+    words = t.lower().split()
+    if all(w in GREETINGS for w in words):
+        return False
+    return True
+
+
 def build_combined_crop_list(cat_keys):
     lines = ""
     for cat_key in cat_keys:
@@ -325,7 +342,7 @@ def handle_admin(chat_id, text_lower):
                 SELECT name, telegram_id, district,
                        crops, added_date, active
                 FROM subscribers
-                ORDER BY added_date DESC
+                ORDER BY added_date DESC, id DESC
             """)
             rows = cur.fetchall()
             cur.close()
@@ -337,10 +354,14 @@ def handle_admin(chat_id, text_lower):
 
             lines = [f"ALL SUBSCRIBERS ({len(rows)} total)\n"]
             for r in rows:
-                name, tid, district, crops, joined, active = r
-                status = "Active" if active == 1 else "Inactive"
+                name     = r[0] or "?"
+                tid      = r[1]
+                district = r[2] or "?"
+                crops    = r[3] or "?"
+                joined   = r[4] or "?"
+                status   = "Active" if r[5] == 1 else "Inactive"
                 lines.append(
-                    f"{name} ({status})\n"
+                    f"{name} [{status}]\n"
                     f"  ID: {tid}\n"
                     f"  Jila: {district}\n"
                     f"  Fasalein: {crops}\n"
@@ -372,12 +393,13 @@ def handle_admin(chat_id, text_lower):
             if not rows:
                 send(chat_id,
                     "Aaj ka data nahi aaya abhi.\n"
-                    "main.py run karein."
-                )
+                    "main.py run karein.")
                 return True
 
-            lines = [f"TODAY DATA ({today_str})\n"
-                     f"{len(rows)} mandis ne report kiya\n"]
+            lines = [
+                f"TODAY DATA ({today_str})\n"
+                f"{len(rows)} mandis ne report kiya\n"
+            ]
             for r in rows:
                 lines.append(f"  {r[0]}: {r[1]} crops")
             send(chat_id, "\n".join(lines)[:4000])
@@ -397,9 +419,14 @@ def handle_registration_step(
     if text_lower in BAND_TRIGGERS + HELP_TRIGGERS:
         return False
 
+    # step 1 -- name
     if step == "awaiting_name":
-        if len(text_clean) < 2 or text_clean.isdigit():
-            send(chat_id, "Apna naam batayein ji:")
+        if not is_valid_name(text_clean):
+            send(chat_id,
+                "Apna poora naam batayein ji.\n"
+                "Jaise: Ramesh Kumar, Anil, Sonia\n\n"
+                "Sirf apna naam likhein:"
+            )
             return True
         set_session(chat_id,
             step="awaiting_district",
@@ -412,6 +439,7 @@ def handle_registration_step(
         )
         return True
 
+    # step 2 -- district
     if step == "awaiting_district":
         if text_clean not in DISTRICTS:
             send(chat_id,
@@ -434,6 +462,7 @@ def handle_registration_step(
         )
         return True
 
+    # step 3 -- category
     if step == "awaiting_category":
         selected_cats = [
             c.strip()
@@ -460,6 +489,7 @@ def handle_registration_step(
         )
         return True
 
+    # step 4 -- crops
     if step == "awaiting_crops_in_category":
         cat_keys      = session.get(
             "selected_category", ""
@@ -481,9 +511,15 @@ def handle_registration_step(
 
         new_crops = ",".join(all_cat_crops[c] for c in valid)
         existing  = session.get("crops") or ""
-        all_crops = (
-            existing + "," + new_crops if existing else new_crops
+
+        # deduplicate crops
+        existing_list = (
+            [c for c in existing.split(",") if c]
+            if existing else []
         )
+        new_list = [c for c in new_crops.split(",") if c]
+        combined = list(dict.fromkeys(existing_list + new_list))
+        all_crops = ",".join(combined)
 
         set_session(chat_id,
             step="awaiting_more_categories",
@@ -498,6 +534,7 @@ def handle_registration_step(
         )
         return True
 
+    # step 5 -- more or finish
     if step == "awaiting_more_categories":
         want_more = text_clean == "1" or text_lower in [
             "haan", "ha", "yes", "aur", "haan ji", "haa"
@@ -522,6 +559,10 @@ def handle_registration_step(
                 f"Category chunein:\n\n{CATEGORY_LIST_TEXT}"
             )
             return True
+
+        # validate name one more time before saving
+        if not is_valid_name(name):
+            name = user_first_name or "Kisan"
 
         add_subscriber(chat_id, name, district, mandis, crops)
         clear_session(chat_id)
@@ -591,7 +632,8 @@ def handle_message(chat_id, text, user_first_name):
             "- MSP se tulna -- bechein ya ruken\n"
             "- Aapke jile ki mandion ka data\n"
             "- Bilkul muft\n\n"
-            "Apna naam batayein:"
+            "Apna poora naam batayein:\n"
+            "(Jaise: Ramesh Kumar, Anil Singh)"
         )
         return
 

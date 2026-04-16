@@ -7,18 +7,17 @@ def add_subscriber(name, telegram_id, district, mandis, crops):
     conn = get_conn()
     cur  = conn.cursor()
     try:
+        # first deactivate any existing rows for this ID
+        cur.execute("""
+            UPDATE subscribers SET active = 0
+            WHERE telegram_id = %s
+        """, (str(telegram_id),))
+
+        # then insert fresh row
         cur.execute("""
             INSERT INTO subscribers
             (name, telegram_id, district, mandis, crops, active, added_date)
             VALUES (%s,%s,%s,%s,%s,1,%s)
-            ON CONFLICT (telegram_id)
-            DO UPDATE SET
-                name=EXCLUDED.name,
-                district=EXCLUDED.district,
-                mandis=EXCLUDED.mandis,
-                crops=EXCLUDED.crops,
-                active=1,
-                added_date=EXCLUDED.added_date
         """, (name, str(telegram_id), district, mandis, crops,
               str(date.today())))
         conn.commit()
@@ -35,9 +34,12 @@ def get_active_subscribers():
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute("""
-            SELECT id, name, telegram_id, district, mandis, crops,
-                   active, added_date
-            FROM subscribers WHERE active = 1
+            SELECT DISTINCT ON (telegram_id)
+                id, name, telegram_id, district, mandis, crops,
+                active, added_date
+            FROM subscribers
+            WHERE active = 1
+            ORDER BY telegram_id, id DESC
         """)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, row)) for row in cur.fetchall()]
@@ -58,6 +60,8 @@ def get_subscriber(telegram_id):
                    active, added_date
             FROM subscribers
             WHERE telegram_id = %s AND active = 1
+            ORDER BY id DESC
+            LIMIT 1
         """, (str(telegram_id),))
         cols = [d[0] for d in cur.description]
         row  = cur.fetchone()
