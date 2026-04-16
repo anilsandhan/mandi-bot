@@ -1,3 +1,4 @@
+import os
 from fetcher import run as fetch_run
 from analyser import analyse_for_subscriber
 from narrator import generate_hindi_message, build_personalised_prompt
@@ -23,15 +24,12 @@ def run_pipeline():
 
     for sub in subscribers:
         print(f"--- {sub['name']} ({sub['district']}) ---")
-
         summary = analyse_for_subscriber(sub)
         if not summary:
             print(f"  No data -- skipping\n")
             continue
-
-        prompt = build_personalised_prompt(summary)
+        prompt  = build_personalised_prompt(summary)
         message = generate_hindi_message(summary, prompt_override=prompt)
-
         print(f"  Preview: {message[:80]}...")
         success = send_to(sub["telegram_id"], message)
         print(f"  Sent: {'OK' if success else 'FAILED'}\n")

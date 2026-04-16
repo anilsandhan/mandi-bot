@@ -1,15 +1,22 @@
+import os
 import requests
 from datetime import date
 
 
 def load_env():
     env = {}
-    with open(r"C:\mandi_bot\.env", "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip()
+    env_path = r"C:\mandi_bot\.env"
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    env[k.strip()] = v.strip()
+    for key in ["DATA_GOV_API_KEY", "ANTHROPIC_API_KEY",
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]:
+        if key not in env and os.environ.get(key):
+            env[key] = os.environ.get(key)
     return env
 
 
@@ -63,7 +70,6 @@ def build_personalised_prompt(summary):
     missing       = summary.get("missing_mandis", [])
     fallback_used = summary.get("fallback_used", False)
 
-    # data freshness note
     if missing and fallback_used:
         data_note = (
             f"Aaj ki report nahi aayi: {', '.join(missing)}. "
@@ -89,7 +95,7 @@ def build_personalised_prompt(summary):
 
         if c["week_change"] is not None:
             trend = f"{c['week_change']:+.1f}% (4-din se)"
-        elif c["avg_4day"]:
+        elif c.get("avg_4day"):
             trend = f"4-din avg: Rs.{c['avg_4day']}"
         else:
             trend = "pehla din"
@@ -97,8 +103,8 @@ def build_personalised_prompt(summary):
         crops_text += (
             f"\n- {c['commodity']}: Rs.{c['avg_modal']}/quintal"
             f" | {msp_line} | {trend}"
-            f" | best mandi: {c['best_market']} Rs.{c['best_price']}"
-            f" | Signal: {c['signal']}"
+            f" | best: {c['best_market']} Rs.{c['best_price']}"
+            f" | {c['signal']}"
         )
 
     return f"""You are an agricultural advisor for Haryana farmers.
@@ -115,7 +121,7 @@ Rules:
 2. First line: date + {district} + Mandi Bhav
 3. One line per crop: price, MSP diff, best mandi, signal
 4. SELL crops first
-5. If mandis missing -- add ONE short warning line about it
+5. If mandis missing -- add ONE short warning line
 6. Last line: short actionable advice
 7. Max 550 characters
 8. Simple language a farmer understands
@@ -136,9 +142,9 @@ def generate_hindi_message(summary, prompt_override=None):
         "content-type":      "application/json",
     }
     body = {
-        "model":      "claude-haiku-4-5-20251001",
+        "model":    "claude-haiku-4-5-20251001",
         "max_tokens": 800,
-        "messages":   [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": prompt}],
     }
 
     try:
@@ -184,14 +190,10 @@ def build_fallback_message(summary):
         lines.append(
             f"\nBest mandi: {summary['crops'][0]['best_market']}"
         )
-
     if missing:
-        lines.append(
-            f"\nAaj report nahi aayi: {', '.join(missing)}"
-        )
+        lines.append(f"Aaj report nahi aayi: {', '.join(missing)}")
     if present:
-        lines.append(f"Data source: {', '.join(present)}")
-
+        lines.append(f"Data: {', '.join(present)}")
     if summary.get("fallback_used"):
         lines.append("(Kuch data kal ka hai)")
 

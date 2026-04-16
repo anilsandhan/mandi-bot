@@ -1,4 +1,5 @@
 import sqlite3
+import os
 from datetime import date, timedelta
 from fetcher import get_prices_for_date, get_todays_prices, get_mandis_in_db
 
@@ -68,7 +69,6 @@ def get_mandi_coverage(subscriber):
         for m in subscriber["mandis"].split(",")
     ]
     today_mandis = get_mandis_in_db(date.today())
-
     present = []
     missing = []
     for m in wanted_mandis:
@@ -84,14 +84,13 @@ def build_crop_entry(commodity, price_list, wanted_mandis=None):
     if avg_today == 0:
         return None
 
-    msp         = get_msp(commodity)
+    msp          = get_msp(commodity)
     market_name, best_price = best_market(price_list)
-    msp_diff    = avg_today - msp if msp else None
+    msp_diff     = avg_today - msp if msp else None
     msp_diff_pct = round((msp_diff / msp) * 100, 1) if msp else None
 
-    # 4-day trend
-    avg_4day    = get_4day_avg(commodity, wanted_mandis)
-    change_pct  = None
+    avg_4day   = get_4day_avg(commodity, wanted_mandis)
+    change_pct = None
     if avg_4day and avg_4day > 0:
         change_pct = round(
             ((avg_today - avg_4day) / avg_4day) * 100, 1
@@ -105,17 +104,17 @@ def build_crop_entry(commodity, price_list, wanted_mandis=None):
         signal = "NEUTRAL"
 
     return {
-        "commodity":     commodity,
-        "avg_modal":     avg_today,
-        "best_market":   market_name,
-        "best_price":    best_price,
-        "msp":           msp,
-        "msp_diff":      msp_diff,
-        "msp_diff_pct":  msp_diff_pct,
-        "week_change":   change_pct,
-        "avg_4day":      avg_4day,
-        "signal":        signal,
-        "num_markets":   len(price_list),
+        "commodity":    commodity,
+        "avg_modal":    avg_today,
+        "best_market":  market_name,
+        "best_price":   best_price,
+        "msp":          msp,
+        "msp_diff":     msp_diff,
+        "msp_diff_pct": msp_diff_pct,
+        "week_change":  change_pct,
+        "avg_4day":     avg_4day,
+        "signal":       signal,
+        "num_markets":  len(price_list),
     }
 
 
@@ -142,14 +141,14 @@ def analyse():
         key=lambda x: signal_order.get(x["signal"], 9)
     )
 
-    print(f"[ANALYSE] {len(summary['crops'])} crops")
+    print(f"[ANALYSE] {len(summary['crops'])} crops analysed")
     for c in summary["crops"]:
-        trend = (f"{c['week_change']:+.1f}% vs 4-day avg"
+        trend = (f"{c['week_change']:+.1f}% vs 4-day"
                  if c["week_change"] is not None else "no history")
         msp_s = (f"MSP diff Rs.{c['msp_diff']}"
                  if c["msp_diff"] is not None else "no MSP")
         print(f"  {c['commodity']:25} | Rs.{c['avg_modal']:5} | "
-              f"{msp_s:22} | {trend:25} | {c['signal']}")
+              f"{msp_s:22} | {trend} | {c['signal']}")
 
     return summary
 
@@ -168,7 +167,7 @@ def analyse_for_subscriber(subscriber):
         for c in subscriber["crops"].split(",")
     ]
 
-    # primary filter -- subscriber's mandis + crops
+    # primary -- subscriber mandis + crops
     filtered = [
         p for p in all_prices
         if any(m in p["market"].lower() for m in wanted_mandis)
@@ -177,13 +176,13 @@ def analyse_for_subscriber(subscriber):
 
     # fallback 1 -- any mandi with their crops
     if not filtered:
-        print(f"[ANALYSE] No mandi+crop match -- trying crop-only")
+        print(f"[ANALYSE] No mandi+crop match -- crop-only fallback")
         filtered = [
             p for p in all_prices
             if any(c in p["commodity"].lower() for c in wanted_crops)
         ]
 
-    # fallback 2 -- check last 4 days for their mandis
+    # fallback 2 -- last 4 days
     if not filtered:
         print(f"[ANALYSE] No today data -- checking last 4 days")
         today = date.today()
@@ -195,26 +194,26 @@ def analyse_for_subscriber(subscriber):
                 and any(c in p["commodity"].lower() for c in wanted_crops)
             ]
             if filtered:
-                print(f"[ANALYSE] Found data from {today - timedelta(days=i)}")
+                print(f"[ANALYSE] Found data from "
+                      f"{today - timedelta(days=i)}")
                 break
 
     if not filtered:
-        print(f"[ANALYSE] No data found for {subscriber['name']}")
+        print(f"[ANALYSE] No data for {subscriber['name']}")
         return None
 
-    # mandi coverage info
     present_mandis, missing_mandis = get_mandi_coverage(subscriber)
-
     grouped = group_by_commodity(filtered)
+
     summary = {
-        "date":             str(date.today()),
-        "subscriber_name":  subscriber["name"],
-        "district":         subscriber["district"],
-        "total_records":    len(filtered),
-        "fallback_used":    any(p.get("is_fallback", 0) for p in filtered),
-        "present_mandis":   present_mandis,
-        "missing_mandis":   missing_mandis,
-        "crops":            [],
+        "date":            str(date.today()),
+        "subscriber_name": subscriber["name"],
+        "district":        subscriber["district"],
+        "total_records":   len(filtered),
+        "fallback_used":   any(p.get("is_fallback", 0) for p in filtered),
+        "present_mandis":  present_mandis,
+        "missing_mandis":  missing_mandis,
+        "crops":           [],
     }
 
     for commodity, price_list in grouped.items():

@@ -1,30 +1,40 @@
 import sqlite3
 import os
 import threading
+import time
 from datetime import date
 from flask import Flask, request
 import requests
 
 app = Flask(__name__)
 
+IS_LOCAL = os.path.exists(r"C:\mandi_bot")
 
 def load_env():
     env = {}
-    with open(r"C:\mandi_bot\.env", "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip()
+    env_path = r"C:\mandi_bot\.env"
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    env[k.strip()] = v.strip()
+    for key in ["DATA_GOV_API_KEY", "ANTHROPIC_API_KEY",
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]:
+        if key not in env and os.environ.get(key):
+            env[key] = os.environ.get(key)
     return env
 
 
-ENV = load_env()
-BOT_TOKEN = ENV["TELEGRAM_BOT_TOKEN"]
-BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+ENV       = load_env()
+BOT_TOKEN = ENV.get("TELEGRAM_BOT_TOKEN", "")
+BASE_URL  = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-SUBSCRIBERS_DB = r"C:\mandi_bot\data\subscribers.db"
-SESSIONS_DB    = r"C:\mandi_bot\data\sessions.db"
+SUBSCRIBERS_DB = (r"C:\mandi_bot\data\subscribers.db" if IS_LOCAL
+                  else "/opt/render/project/src/data/subscribers.db")
+SESSIONS_DB    = (r"C:\mandi_bot\data\sessions.db" if IS_LOCAL
+                  else "/opt/render/project/src/data/sessions.db")
 
 DISTRICTS = {
     "1":  ("Karnal",      "Gharaunda,Kunjpura,Pipli,Thanesar"),
@@ -170,7 +180,7 @@ def get_session(telegram_id):
 
 
 def set_session(telegram_id, **kwargs):
-    conn = sqlite3.connect(SESSIONS_DB)
+    conn     = sqlite3.connect(SESSIONS_DB)
     existing = get_session(telegram_id)
     if existing:
         fields = ", ".join(f"{k} = ?" for k in kwargs)
@@ -182,8 +192,8 @@ def set_session(telegram_id, **kwargs):
         )
     else:
         kwargs["telegram_id"] = str(telegram_id)
-        kwargs["updated"] = str(date.today())
-        cols = ", ".join(kwargs.keys())
+        kwargs["updated"]     = str(date.today())
+        cols         = ", ".join(kwargs.keys())
         placeholders = ", ".join(["?"] * len(kwargs))
         conn.execute(
             f"INSERT INTO sessions ({cols}) VALUES ({placeholders})",
@@ -267,10 +277,10 @@ def build_combined_crop_list(cat_keys):
     lines = ""
     for cat_key in cat_keys:
         cat_name = CROP_CATEGORIES.get(cat_key, "")
-        crops = CROPS_BY_CATEGORY.get(cat_key, {})
-        lines += f"{cat_name}:\n"
-        lines += "\n".join(f"{k}. {v}" for k, v in crops.items())
-        lines += "\n\n"
+        crops    = CROPS_BY_CATEGORY.get(cat_key, {})
+        lines   += f"{cat_name}:\n"
+        lines   += "\n".join(f"{k}. {v}" for k, v in crops.items())
+        lines   += "\n\n"
     return lines.strip()
 
 
@@ -282,10 +292,9 @@ def get_all_crops_from_categories(cat_keys):
 
 
 def handle_registration_step(chat_id, text_clean, session, user_first_name):
-    step = session.get("step")
+    step       = session.get("step")
     text_lower = text_clean.lower().strip()
 
-    # allow /band and /help to escape registration
     if text_lower in BAND_TRIGGERS + HELP_TRIGGERS:
         return False
 
@@ -294,10 +303,7 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
         if len(text_clean) < 2 or text_clean.isdigit():
             send(chat_id, "Apna naam batayein ji:")
             return True
-        set_session(chat_id,
-            step="awaiting_district",
-            name=text_clean
-        )
+        set_session(chat_id, step="awaiting_district", name=text_clean)
         send(chat_id,
             f"Shukriya {text_clean} ji!\n\n"
             f"Apna jila chunein -- sirf number bhejein:\n\n"
@@ -327,7 +333,7 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
         )
         return True
 
-    # step 3 -- category (one or multiple like 1,2)
+    # step 3 -- category
     if step == "awaiting_category":
         selected_cats = [
             c.strip()
@@ -352,22 +358,19 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
         )
         return True
 
-    # step 4 -- crops within selected categories
+    # step 4 -- crops
     if step == "awaiting_crops_in_category":
-        cat_keys = session.get("selected_category", "").split(",")
+        cat_keys      = session.get("selected_category", "").split(",")
         all_cat_crops = get_all_crops_from_categories(cat_keys)
-
-        selected = [
+        selected      = [
             c.strip()
             for c in text_clean.replace(" ", "").split(",")
         ]
         valid = [c for c in selected if c in all_cat_crops]
-
         if not valid:
             crop_list = build_combined_crop_list(cat_keys)
             send(chat_id,
-                f"Sahi numbers bhejein ji:\n\n"
-                f"{crop_list}"
+                f"Sahi numbers bhejein ji:\n\n{crop_list}"
             )
             return True
 
@@ -381,28 +384,25 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
         )
         crop_display = ", ".join(all_cat_crops[c] for c in valid)
         send(chat_id,
-            f"Selected: {crop_display}\n\n"
+            f"Chuni gayi fasalein: {crop_display}\n\n"
             f"Kya aur category add karni hai?\n\n"
             f"1. Haan -- aur category chunni hai\n"
             f"2. Nahi -- registration complete karo"
         )
         return True
 
-    # step 5 -- more categories or finish
+    # step 5 -- more or finish
     if step == "awaiting_more_categories":
         want_more = text_clean == "1" or text_lower in [
             "haan", "ha", "yes", "aur", "haan ji", "haa"
         ]
-
         if want_more:
             set_session(chat_id, step="awaiting_category")
             send(chat_id,
-                f"Aur category chunein:\n\n"
-                f"{CATEGORY_LIST_TEXT}"
+                f"Aur category chunein:\n\n{CATEGORY_LIST_TEXT}"
             )
             return True
 
-        # finish registration
         name     = session.get("name", user_first_name)
         district = session.get("district")
         mandis   = session.get("mandis")
@@ -412,8 +412,7 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
             set_session(chat_id, step="awaiting_category")
             send(chat_id,
                 f"Koi fasal nahi chuni ji.\n\n"
-                f"Category chunein:\n\n"
-                f"{CATEGORY_LIST_TEXT}"
+                f"Category chunein:\n\n{CATEGORY_LIST_TEXT}"
             )
             return True
 
@@ -447,7 +446,7 @@ def handle_message(chat_id, text, user_first_name):
           f"step={session.get('step') if session else None} "
           f"text='{text_clean}'")
 
-    # priority 1 -- mid registration
+    # priority 1 -- registration flow
     if session and session.get("step") in REGISTRATION_STEPS:
         handled = handle_registration_step(
             chat_id, text_clean, session, user_first_name
@@ -455,7 +454,7 @@ def handle_message(chat_id, text, user_first_name):
         if handled:
             return
 
-    # priority 2 -- greeting / start
+    # priority 2 -- greeting
     if is_greeting(text_clean) or text_clean == "/start":
         existing = get_subscriber(chat_id)
         if existing:
@@ -567,7 +566,7 @@ def handle_message(chat_id, text, user_first_name):
         )
         return
 
-    # priority 8 -- fallback
+    # fallback
     send(chat_id,
         "Samajh nahi aaya ji.\n\n"
         "Bhav ke liye: /mera_bhav\n"
@@ -599,6 +598,17 @@ def send_instant_bhav(chat_id, subscriber):
         print(f"[BOT ERROR] {e}")
         import traceback
         traceback.print_exc()
+
+
+def keep_alive():
+    time.sleep(60)
+    while True:
+        try:
+            requests.get("https://mandi-bot.onrender.com/", timeout=10)
+            print("[KEEPALIVE] Pinged")
+        except Exception as e:
+            print(f"[KEEPALIVE ERROR] {e}")
+        time.sleep(600)
 
 
 @app.route("/webhook", methods=["POST"])
@@ -637,5 +647,7 @@ def index():
 
 if __name__ == "__main__":
     init_sessions_db()
+    threading.Thread(target=keep_alive, daemon=True).start()
     print("[BOT] Starting webhook server on port 5000...")
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

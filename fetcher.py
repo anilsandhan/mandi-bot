@@ -3,21 +3,29 @@ import sqlite3
 import os
 from datetime import date, timedelta
 
+IS_LOCAL = os.path.exists(r"C:\mandi_bot")
 
 def load_env():
     env = {}
-    with open(r"C:\mandi_bot\.env", "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip()
+    env_path = r"C:\mandi_bot\.env"
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    env[k.strip()] = v.strip()
+    for key in ["DATA_GOV_API_KEY", "ANTHROPIC_API_KEY",
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]:
+        if key not in env and os.environ.get(key):
+            env[key] = os.environ.get(key)
     return env
 
 
 ENV     = load_env()
-API_KEY = ENV["DATA_GOV_API_KEY"]
-DB_PATH = r"C:\mandi_bot\data\prices.db"
+API_KEY = ENV.get("DATA_GOV_API_KEY", "")
+DB_PATH = (r"C:\mandi_bot\data\prices.db" if IS_LOCAL
+           else "/opt/render/project/src/data/prices.db")
 
 TARGET_MANDIS = [
     "karnal", "taraori", "nilokheri", "kurukshetra",
@@ -70,8 +78,8 @@ def fetch_haryana_for_date(target_date=None, limit=100):
 
     params_base = {
         "api-key": API_KEY,
-        "format": "json",
-        "limit": limit,
+        "format":  "json",
+        "limit":   limit,
         "filters[state.keyword]": "Haryana",
     }
     if target_date:
@@ -83,7 +91,7 @@ def fetch_haryana_for_date(target_date=None, limit=100):
         try:
             r = requests.get(url, params=params, timeout=30)
             r.raise_for_status()
-            data = r.json()
+            data    = r.json()
             records = data.get("records", [])
             all_records.extend(records)
             total = int(data.get("total", 0))
@@ -97,7 +105,7 @@ def fetch_haryana_for_date(target_date=None, limit=100):
             try:
                 r = requests.get(url, params=params, timeout=45)
                 r.raise_for_status()
-                data = r.json()
+                data    = r.json()
                 records = data.get("records", [])
                 all_records.extend(records)
                 total = int(data.get("total", 0))
@@ -133,7 +141,7 @@ def filter_records(records):
 
 
 def save_records(records, store_date, is_fallback=0):
-    conn = sqlite3.connect(DB_PATH)
+    conn  = sqlite3.connect(DB_PATH)
     saved = 0
     for r in records:
         try:
@@ -164,6 +172,8 @@ def save_records(records, store_date, is_fallback=0):
 
 
 def get_prices_for_date(target_date):
+    if not os.path.exists(DB_PATH):
+        return []
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
@@ -181,6 +191,8 @@ def get_todays_prices():
 def get_mandis_in_db(target_date=None):
     if not target_date:
         target_date = date.today()
+    if not os.path.exists(DB_PATH):
+        return []
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute("""
         SELECT DISTINCT market FROM prices WHERE fetch_date = ?
@@ -192,7 +204,7 @@ def get_mandis_in_db(target_date=None):
 def fetch_last_4_days():
     today = date.today()
     for i in range(1, 5):
-        target = today - timedelta(days=i)
+        target   = today - timedelta(days=i)
         existing = get_prices_for_date(target)
         if existing:
             print(f"[HISTORY] {target} -- {len(existing)} records already saved")
@@ -201,7 +213,7 @@ def fetch_last_4_days():
         records = fetch_haryana_for_date(target_date=target)
         if records:
             filtered = filter_records(records)
-            saved = save_records(filtered, target)
+            saved    = save_records(filtered, target)
             print(f"[HISTORY] {target} -- saved {saved} records")
         else:
             print(f"[HISTORY] {target} -- no data from API")
@@ -243,19 +255,16 @@ def inject_yesterday_fallback():
 def run():
     init_db()
 
-    # layer 1 -- today's fresh data
     print("[FETCH] Pulling today's Haryana data...")
     records = fetch_haryana_for_date()
     if records:
         filtered = filter_records(records)
-        saved = save_records(filtered, date.today())
+        saved    = save_records(filtered, date.today())
         print(f"[DB] Saved {saved} fresh records for today")
 
-    # layer 2 -- yesterday fallback for missing mandis
     print("\n[FALLBACK] Checking missing mandis...")
     inject_yesterday_fallback()
 
-    # layer 3 -- backfill last 4 days for trend data
     print("\n[HISTORY] Backfilling last 4 days...")
     fetch_last_4_days()
 

@@ -2,8 +2,9 @@ import sqlite3
 import os
 from datetime import date
 
-
-DB_PATH = r"C:\mandi_bot\data\subscribers.db"
+IS_LOCAL = os.path.exists(r"C:\mandi_bot")
+DB_PATH  = (r"C:\mandi_bot\data\subscribers.db" if IS_LOCAL
+            else "/opt/render/project/src/data/subscribers.db")
 
 
 def init_db():
@@ -32,7 +33,7 @@ def add_subscriber(name, telegram_id, district, mandis, crops):
             INSERT OR REPLACE INTO subscribers
             (name, telegram_id, district, mandis, crops, active, added_date)
             VALUES (?,?,?,?,?,1,?)
-        """, (name, telegram_id, district, mandis, crops, str(date.today())))
+        """, (name, str(telegram_id), district, mandis, crops, str(date.today())))
         conn.commit()
         print(f"[SUBSCRIBERS] Added: {name} | {district} | {crops}")
     except Exception as e:
@@ -42,9 +43,13 @@ def add_subscriber(name, telegram_id, district, mandis, crops):
 
 
 def get_active_subscribers():
+    if not os.path.exists(DB_PATH):
+        return []
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    rows = conn.execute("SELECT * FROM subscribers WHERE active = 1").fetchall()
+    rows = conn.execute(
+        "SELECT * FROM subscribers WHERE active = 1"
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -53,16 +58,10 @@ def list_subscribers():
     subs = get_active_subscribers()
     print(f"\n{len(subs)} active subscribers:")
     for s in subs:
-        print(f"  {s['id']:3} | {s['name']:20} | {s['district']:12} | {s['crops']}")
+        print(f"  {s['id']:3} | {s['name']:20} | "
+              f"{s['district']:12} | {s['crops']}")
 
 
 if __name__ == "__main__":
     init_db()
-    add_subscriber(
-        name="Anil - Karnal",
-        telegram_id="1756491671",
-        district="Karnal",
-        mandis="Gharaunda,Kunjpura,Pipli,Thanesar,Panipat,Shahabad,Pehowa",
-        crops="Wheat,Mustard,Barley"
-    )
     list_subscribers()
