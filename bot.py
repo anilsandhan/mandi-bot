@@ -39,36 +39,24 @@ CROP_CATEGORIES = {
 
 CROPS_BY_CATEGORY = {
     "1": {
-        "1":  "Wheat",
-        "2":  "Mustard",
-        "3":  "Barley",
-        "4":  "Paddy",
-        "5":  "Maize",
-        "6":  "Bajra",
-        "7":  "Sunflower",
+        "1": "Wheat",  "2": "Mustard", "3": "Barley",
+        "4": "Paddy",  "5": "Maize",   "6": "Bajra",
+        "7": "Sunflower",
     },
     "2": {
-        "8":  "Onion",
-        "9":  "Potato",
-        "10": "Tomato",
-        "11": "Cucumbar(Kheera)",
-        "12": "Garlic",
-        "13": "Ginger",
-        "14": "Bottle Gourd",
-        "15": "Brinjal",
+        "8":  "Onion",        "9":  "Potato",
+        "10": "Tomato",       "11": "Cucumbar(Kheera)",
+        "12": "Garlic",       "13": "Ginger",
+        "14": "Bottle Gourd", "15": "Brinjal",
     },
     "3": {
-        "16": "Apple",
-        "17": "Banana",
-        "18": "Chikoos(Sapota)",
-        "19": "Mango",
+        "16": "Apple",  "17": "Banana",
+        "18": "Chikoos(Sapota)", "19": "Mango",
         "20": "Guava",
     },
     "4": {
-        "21": "Dry Fodder",
-        "22": "Green Fodder",
-        "23": "Cotton",
-        "24": "Sugarcane",
+        "21": "Dry Fodder",  "22": "Green Fodder",
+        "23": "Cotton",      "24": "Sugarcane",
     },
 }
 
@@ -127,10 +115,6 @@ REGISTRATION_STEPS = [
 
 ADMIN_COMMANDS = ["/admin", "/stats", "/users", "/today"]
 
-ALL_CROPS = {}
-for cat_crops in CROPS_BY_CATEGORY.values():
-    ALL_CROPS.update(cat_crops)
-
 
 def get_session(telegram_id):
     try:
@@ -162,16 +146,14 @@ def set_session(telegram_id, **kwargs):
             values = list(kwargs.values()) + [str(telegram_id)]
             cur.execute(
                 f"UPDATE sessions SET {fields} "
-                f"WHERE telegram_id = %s",
-                values
+                f"WHERE telegram_id = %s", values
             )
         else:
             kwargs["telegram_id"] = str(telegram_id)
-            cols         = ", ".join(kwargs.keys())
-            placeholders = ", ".join(["%s"] * len(kwargs))
+            cols  = ", ".join(kwargs.keys())
+            ph    = ", ".join(["%s"] * len(kwargs))
             cur.execute(
-                f"INSERT INTO sessions ({cols}) "
-                f"VALUES ({placeholders})",
+                f"INSERT INTO sessions ({cols}) VALUES ({ph})",
                 list(kwargs.values())
             )
         conn.commit()
@@ -201,8 +183,7 @@ def send(chat_id, text):
     try:
         r = requests.post(
             f"{BASE_URL}/sendMessage",
-            json=payload,
-            timeout=10
+            json=payload, timeout=10
         )
         print(f"[SEND] to={chat_id} status={r.status_code}")
         if r.status_code != 200:
@@ -216,7 +197,6 @@ def is_greeting(text):
 
 
 def is_valid_name(text):
-    """Rejects greetings, commands, numbers as names"""
     t = text.strip()
     if len(t) < 2:
         return False
@@ -238,9 +218,7 @@ def build_combined_crop_list(cat_keys):
         cat_name = CROP_CATEGORIES.get(cat_key, "")
         crops    = CROPS_BY_CATEGORY.get(cat_key, {})
         lines   += f"{cat_name}:\n"
-        lines   += "\n".join(
-            f"{k}. {v}" for k, v in crops.items()
-        )
+        lines   += "\n".join(f"{k}. {v}" for k, v in crops.items())
         lines   += "\n\n"
     return lines.strip()
 
@@ -265,14 +243,10 @@ def handle_admin(chat_id, text_lower):
             conn = get_conn()
             cur  = conn.cursor()
 
-            cur.execute(
-                "SELECT COUNT(*) FROM subscribers WHERE active = 1"
-            )
+            cur.execute("SELECT COUNT(*) FROM subscribers WHERE active=1")
             active = cur.fetchone()[0]
 
-            cur.execute(
-                "SELECT COUNT(*) FROM subscribers WHERE active = 0"
-            )
+            cur.execute("SELECT COUNT(*) FROM subscribers WHERE active=0")
             inactive = cur.fetchone()[0]
 
             cur.execute("SELECT COUNT(*) FROM subscribers")
@@ -283,21 +257,19 @@ def handle_admin(chat_id, text_lower):
 
             cur.execute("""
                 SELECT COUNT(DISTINCT market) FROM prices
-                WHERE fetch_date = %s::text
+                WHERE fetch_date = %s
             """, (today_str,))
             mandis_today = cur.fetchone()[0]
 
             cur.execute("""
                 SELECT COUNT(*) FROM prices
-                WHERE fetch_date = %s::text
-                AND is_fallback = 0
+                WHERE fetch_date = %s AND is_fallback = 0
             """, (today_str,))
             fresh = cur.fetchone()[0]
 
             cur.execute("""
                 SELECT COUNT(*) FROM prices
-                WHERE fetch_date = %s::text
-                AND is_fallback = 1
+                WHERE fetch_date = %s AND is_fallback = 1
             """, (today_str,))
             fallback = cur.fetchone()[0]
 
@@ -307,15 +279,14 @@ def handle_admin(chat_id, text_lower):
                 GROUP BY district ORDER BY cnt DESC
             """)
             districts = cur.fetchall()
-
             cur.close()
             conn.close()
 
-            district_text = "\n".join(
+            dist_text = "\n".join(
                 f"  {r[0]}: {r[1]}" for r in districts
             ) or "  None yet"
 
-            msg = (
+            send(chat_id,
                 f"ADMIN STATS\n"
                 f"{'='*28}\n\n"
                 f"SUBSCRIBERS\n"
@@ -323,13 +294,12 @@ def handle_admin(chat_id, text_lower):
                 f"Unsubscribed: {inactive}\n"
                 f"Total ever: {total}\n"
                 f"Mid-registration: {sessions}\n\n"
-                f"TODAY DATA ({today_str})\n"
-                f"Mandis covered: {mandis_today}\n"
+                f"TODAY ({today_str})\n"
+                f"Mandis: {mandis_today}\n"
                 f"Fresh records: {fresh}\n"
                 f"Fallback records: {fallback}\n\n"
-                f"BY DISTRICT\n{district_text}"
+                f"BY DISTRICT\n{dist_text}"
             )
-            send(chat_id, msg)
         except Exception as e:
             send(chat_id, f"Stats error: {e}")
         return True
@@ -339,10 +309,11 @@ def handle_admin(chat_id, text_lower):
             conn = get_conn()
             cur  = conn.cursor()
             cur.execute("""
-                SELECT name, telegram_id, district,
-                       crops, added_date, active
+                SELECT DISTINCT ON (telegram_id)
+                    name, telegram_id, district,
+                    crops, added_date, active
                 FROM subscribers
-                ORDER BY added_date DESC, id DESC
+                ORDER BY telegram_id, id DESC
             """)
             rows = cur.fetchall()
             cur.close()
@@ -352,25 +323,19 @@ def handle_admin(chat_id, text_lower):
                 send(chat_id, "No subscribers yet.")
                 return True
 
-            lines = [f"ALL SUBSCRIBERS ({len(rows)} total)\n"]
+            lines = [f"SUBSCRIBERS ({len(rows)} total)\n"]
             for r in rows:
-                name     = r[0] or "?"
-                tid      = r[1]
-                district = r[2] or "?"
-                crops    = r[3] or "?"
-                joined   = r[4] or "?"
-                status   = "Active" if r[5] == 1 else "Inactive"
+                name, tid, dist, crops, joined, active = r
+                status = "Active" if active == 1 else "Inactive"
                 lines.append(
-                    f"{name} [{status}]\n"
+                    f"{name or '?'} [{status}]\n"
                     f"  ID: {tid}\n"
-                    f"  Jila: {district}\n"
-                    f"  Fasalein: {crops}\n"
-                    f"  Joined: {joined}\n"
+                    f"  Jila: {dist or '?'}\n"
+                    f"  Fasalein: {crops or '?'}\n"
+                    f"  Joined: {joined or '?'}\n"
                 )
-            full_msg = "\n".join(lines)
-            if len(full_msg) > 4000:
-                full_msg = full_msg[:3900] + "\n...(aur hain)"
-            send(chat_id, full_msg)
+            msg = "\n".join(lines)
+            send(chat_id, msg[:4000])
         except Exception as e:
             send(chat_id, f"Users error: {e}")
         return True
@@ -382,7 +347,7 @@ def handle_admin(chat_id, text_lower):
             cur.execute("""
                 SELECT market, COUNT(*) as cnt
                 FROM prices
-                WHERE fetch_date = %s::text
+                WHERE fetch_date = %s
                 AND is_fallback = 0
                 GROUP BY market ORDER BY market
             """, (today_str,))
@@ -392,14 +357,12 @@ def handle_admin(chat_id, text_lower):
 
             if not rows:
                 send(chat_id,
-                    "Aaj ka data nahi aaya abhi.\n"
-                    "main.py run karein.")
+                    f"Aaj ({today_str}) ka fresh data nahi aaya.\n"
+                    f"main.py run karein data fetch karne ke liye."
+                )
                 return True
 
-            lines = [
-                f"TODAY DATA ({today_str})\n"
-                f"{len(rows)} mandis ne report kiya\n"
-            ]
+            lines = [f"TODAY ({today_str})\n{len(rows)} mandis\n"]
             for r in rows:
                 lines.append(f"  {r[0]}: {r[1]} crops")
             send(chat_id, "\n".join(lines)[:4000])
@@ -410,16 +373,14 @@ def handle_admin(chat_id, text_lower):
     return False
 
 
-def handle_registration_step(
-    chat_id, text_clean, session, user_first_name
-):
+def handle_registration_step(chat_id, text_clean, session,
+                              user_first_name):
     step       = session.get("step")
     text_lower = text_clean.lower().strip()
 
     if text_lower in BAND_TRIGGERS + HELP_TRIGGERS:
         return False
 
-    # step 1 -- name
     if step == "awaiting_name":
         if not is_valid_name(text_clean):
             send(chat_id,
@@ -428,10 +389,8 @@ def handle_registration_step(
                 "Sirf apna naam likhein:"
             )
             return True
-        set_session(chat_id,
-            step="awaiting_district",
-            name=text_clean
-        )
+        set_session(chat_id, step="awaiting_district",
+                    name=text_clean)
         send(chat_id,
             f"Shukriya {text_clean} ji!\n\n"
             f"Apna jila chunein -- sirf number bhejein:\n\n"
@@ -439,7 +398,6 @@ def handle_registration_step(
         )
         return True
 
-    # step 2 -- district
     if step == "awaiting_district":
         if text_clean not in DISTRICTS:
             send(chat_id,
@@ -462,19 +420,15 @@ def handle_registration_step(
         )
         return True
 
-    # step 3 -- category
     if step == "awaiting_category":
         selected_cats = [
             c.strip()
             for c in text_clean.replace(" ", "").split(",")
         ]
-        valid_cats = [
-            c for c in selected_cats if c in CROP_CATEGORIES
-        ]
+        valid_cats = [c for c in selected_cats if c in CROP_CATEGORIES]
         if not valid_cats:
             send(chat_id,
-                f"Sirf number bhejein (1-4):\n\n"
-                f"{CATEGORY_LIST_TEXT}"
+                f"Sirf number bhejein (1-4):\n\n{CATEGORY_LIST_TEXT}"
             )
             return True
         crop_list = build_combined_crop_list(valid_cats)
@@ -489,19 +443,14 @@ def handle_registration_step(
         )
         return True
 
-    # step 4 -- crops
     if step == "awaiting_crops_in_category":
-        cat_keys      = session.get(
-            "selected_category", ""
-        ).split(",")
+        cat_keys = session.get("selected_category", "").split(",")
         all_cat_crops = get_all_crops_from_categories(cat_keys)
-
         selected = [
             c.strip()
             for c in text_clean.replace(" ", "").split(",")
         ]
         valid = [c for c in selected if c in all_cat_crops]
-
         if not valid:
             crop_list = build_combined_crop_list(cat_keys)
             send(chat_id,
@@ -509,23 +458,17 @@ def handle_registration_step(
             )
             return True
 
-        new_crops = ",".join(all_cat_crops[c] for c in valid)
-        existing  = session.get("crops") or ""
-
-        # deduplicate crops
-        existing_list = (
-            [c for c in existing.split(",") if c]
-            if existing else []
-        )
-        new_list = [c for c in new_crops.split(",") if c]
-        combined = list(dict.fromkeys(existing_list + new_list))
-        all_crops = ",".join(combined)
+        new_crops  = [all_cat_crops[c] for c in valid]
+        existing   = session.get("crops") or ""
+        exist_list = [c for c in existing.split(",") if c]
+        combined   = list(dict.fromkeys(exist_list + new_crops))
+        all_crops  = ",".join(combined)
 
         set_session(chat_id,
             step="awaiting_more_categories",
             crops=all_crops
         )
-        crop_display = ", ".join(all_cat_crops[c] for c in valid)
+        crop_display = ", ".join(new_crops)
         send(chat_id,
             f"Chuni gayi fasalein: {crop_display}\n\n"
             f"Kya aur category add karni hai?\n\n"
@@ -534,7 +477,6 @@ def handle_registration_step(
         )
         return True
 
-    # step 5 -- more or finish
     if step == "awaiting_more_categories":
         want_more = text_clean == "1" or text_lower in [
             "haan", "ha", "yes", "aur", "haan ji", "haa"
@@ -542,8 +484,7 @@ def handle_registration_step(
         if want_more:
             set_session(chat_id, step="awaiting_category")
             send(chat_id,
-                f"Aur category chunein:\n\n"
-                f"{CATEGORY_LIST_TEXT}"
+                f"Aur category chunein:\n\n{CATEGORY_LIST_TEXT}"
             )
             return True
 
@@ -560,20 +501,18 @@ def handle_registration_step(
             )
             return True
 
-        # validate name one more time before saving
         if not is_valid_name(name):
             name = user_first_name or "Kisan"
 
         add_subscriber(chat_id, name, district, mandis, crops)
         clear_session(chat_id)
-        crop_display = crops.replace(",", ", ")
 
         send(chat_id,
             f"Bahut badhiya {name} ji!\n\n"
             f"Aapka profile taiyaar:\n"
             f"Naam: {name}\n"
             f"Jila: {district}\n"
-            f"Fasalein: {crop_display}\n\n"
+            f"Fasalein: {crops.replace(',', ', ')}\n\n"
             f"Rozana subah 6:30 baje\n"
             f"aapki fasal ka mandi bhav milega.\n\n"
             f"Abhi ka bhav: /mera_bhav\n"
@@ -598,7 +537,7 @@ def handle_message(chat_id, text, user_first_name):
     if handle_admin(chat_id, text_lower):
         return
 
-    # priority 1 -- registration flow
+    # priority 1 -- mid registration
     if session and session.get("step") in REGISTRATION_STEPS:
         handled = handle_registration_step(
             chat_id, text_clean, session, user_first_name
@@ -633,7 +572,7 @@ def handle_message(chat_id, text, user_first_name):
             "- Aapke jile ki mandion ka data\n"
             "- Bilkul muft\n\n"
             "Apna poora naam batayein:\n"
-            "(Jaise: Ramesh Kumar, Anil Singh)"
+            "(Jaise: Ramesh Kumar, Anil, Sonia)"
         )
         return
 
