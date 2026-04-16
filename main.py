@@ -1,9 +1,9 @@
-import os
 from fetcher import run as fetch_run
 from analyser import analyse_for_subscriber
 from narrator import generate_hindi_message, build_personalised_prompt
 from sender import send_to
-from subscribers import get_active_subscribers, init_db as init_subs_db
+from subscribers import get_active_subscribers
+from db import init_db
 from datetime import datetime
 
 
@@ -12,13 +12,14 @@ def run_pipeline():
     print(f"MANDI BOT -- {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     print(f"{'=' * 50}\n")
 
+    init_db()
+
     print("STEP 1: Fetching prices...")
     prices = fetch_run()
     if not prices:
-        print("[MAIN] No prices today -- aborting")
+        print("[MAIN] No prices -- aborting")
         return
 
-    init_subs_db()
     subscribers = get_active_subscribers()
     print(f"\nSTEP 2: {len(subscribers)} active subscribers\n")
 

@@ -1,31 +1,10 @@
-import requests
-import sqlite3
 import os
+import requests
 from datetime import date, timedelta
-
-IS_LOCAL = os.path.exists(r"C:\mandi_bot")
-
-def load_env():
-    env = {}
-    env_path = r"C:\mandi_bot\.env"
-    if os.path.exists(env_path):
-        with open(env_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, v = line.split("=", 1)
-                    env[k.strip()] = v.strip()
-    for key in ["DATA_GOV_API_KEY", "ANTHROPIC_API_KEY",
-                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]:
-        if key not in env and os.environ.get(key):
-            env[key] = os.environ.get(key)
-    return env
-
+from db import get_conn, init_db, load_env
 
 ENV     = load_env()
 API_KEY = ENV.get("DATA_GOV_API_KEY", "")
-DB_PATH = (r"C:\mandi_bot\data\prices.db" if IS_LOCAL
-           else "/opt/render/project/src/data/prices.db")
 
 TARGET_MANDIS = [
     "karnal", "taraori", "nilokheri", "kurukshetra",
@@ -47,34 +26,10 @@ TARGET_CROPS = [
 ]
 
 
-def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS prices (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            fetch_date   TEXT,
-            arrival_date TEXT,
-            district     TEXT,
-            market       TEXT,
-            commodity    TEXT,
-            variety      TEXT,
-            grade        TEXT,
-            min_price    REAL,
-            max_price    REAL,
-            modal_price  REAL,
-            is_fallback  INTEGER DEFAULT 0,
-            UNIQUE(arrival_date, market, commodity, variety)
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
 def fetch_haryana_for_date(target_date=None, limit=100):
     url = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
     all_records = []
-    offset = 0
+    offset      = 0
 
     params_base = {
         "api-key": API_KEY,
@@ -101,7 +56,7 @@ def fetch_haryana_for_date(target_date=None, limit=100):
                 break
             offset += limit
         except Exception as e:
-            print(f"[FETCH ERROR] offset={offset} {e} -- retrying...")
+            print(f"[FETCH ERROR] {e} -- retrying...")
             try:
                 r = requests.get(url, params=params, timeout=45)
                 r.raise_for_status()
@@ -121,7 +76,7 @@ def fetch_haryana_for_date(target_date=None, limit=100):
 
 def filter_records(records):
     filtered = []
-    seen = set()
+    seen     = set()
     for r in records:
         market    = r.get("market", "").lower()
         commodity = r.get("commodity", "").lower()
@@ -141,15 +96,18 @@ def filter_records(records):
 
 
 def save_records(records, store_date, is_fallback=0):
-    conn  = sqlite3.connect(DB_PATH)
+    conn  = get_conn()
+    cur   = conn.cursor()
     saved = 0
     for r in records:
         try:
-            conn.execute("""
-                INSERT OR IGNORE INTO prices
+            cur.execute("""
+                INSERT INTO prices
                 (fetch_date, arrival_date, district, market, commodity,
                  variety, grade, min_price, max_price, modal_price, is_fallback)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (arrival_date, market, commodity, variety)
+                DO NOTHING
             """, (
                 str(store_date),
                 r.get("arrival_date", ""),
@@ -164,24 +122,32 @@ def save_records(records, store_date, is_fallback=0):
                 is_fallback,
             ))
             saved += 1
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[SAVE ERROR] {e}")
     conn.commit()
+    cur.close()
     conn.close()
     return saved
 
 
 def get_prices_for_date(target_date):
-    if not os.path.exists(DB_PATH):
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT fetch_date, arrival_date, district, market, commodity,
+                   variety, grade, min_price, max_price, modal_price, is_fallback
+            FROM prices WHERE fetch_date = %s
+            ORDER BY commodity, market
+        """, (str(target_date),))
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"[DB ERROR] get_prices_for_date: {e}")
         return []
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute("""
-        SELECT * FROM prices WHERE fetch_date = ?
-        ORDER BY commodity, market
-    """, (str(target_date),)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
 
 
 def get_todays_prices():
@@ -191,14 +157,19 @@ def get_todays_prices():
 def get_mandis_in_db(target_date=None):
     if not target_date:
         target_date = date.today()
-    if not os.path.exists(DB_PATH):
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT market FROM prices WHERE fetch_date = %s
+        """, (str(target_date),))
+        rows = [r[0].lower() for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"[DB ERROR] get_mandis_in_db: {e}")
         return []
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute("""
-        SELECT DISTINCT market FROM prices WHERE fetch_date = ?
-    """, (str(target_date),)).fetchall()
-    conn.close()
-    return [r[0].lower() for r in rows]
 
 
 def fetch_last_4_days():
@@ -207,7 +178,7 @@ def fetch_last_4_days():
         target   = today - timedelta(days=i)
         existing = get_prices_for_date(target)
         if existing:
-            print(f"[HISTORY] {target} -- {len(existing)} records already saved")
+            print(f"[HISTORY] {target} -- {len(existing)} records exist")
             continue
         print(f"[HISTORY] Fetching {target}...")
         records = fetch_haryana_for_date(target_date=target)
@@ -216,7 +187,7 @@ def fetch_last_4_days():
             saved    = save_records(filtered, target)
             print(f"[HISTORY] {target} -- saved {saved} records")
         else:
-            print(f"[HISTORY] {target} -- no data from API")
+            print(f"[HISTORY] {target} -- no data")
 
 
 def inject_yesterday_fallback():
@@ -236,10 +207,10 @@ def inject_yesterday_fallback():
     ]
 
     if not missing:
-        print("[FALLBACK] All mandis have today's data")
+        print("[FALLBACK] All mandis covered today")
         return 0
 
-    print(f"[FALLBACK] Missing today: {missing}")
+    print(f"[FALLBACK] Missing: {missing}")
     fallback = [
         p for p in yesterday_prices
         if any(m in p["market"].lower() for m in missing)
@@ -247,7 +218,7 @@ def inject_yesterday_fallback():
 
     if fallback:
         saved = save_records(fallback, today, is_fallback=1)
-        print(f"[FALLBACK] Injected {saved} yesterday records")
+        print(f"[FALLBACK] Injected {saved} records")
         return saved
     return 0
 
@@ -260,7 +231,7 @@ def run():
     if records:
         filtered = filter_records(records)
         saved    = save_records(filtered, date.today())
-        print(f"[DB] Saved {saved} fresh records for today")
+        print(f"[DB] Saved {saved} fresh records")
 
     print("\n[FALLBACK] Checking missing mandis...")
     inject_yesterday_fallback()
@@ -274,7 +245,6 @@ def run():
 
     print(f"\n[RESULT] {len(prices)} total | "
           f"{len(fresh)} fresh | {len(fallback)} fallback")
-    print("\nSample:")
     for p in prices[:6]:
         tag = " [yesterday]" if p.get("is_fallback") else ""
         print(f"  {p['market']:30} | {p['commodity']:20} | "

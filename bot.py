@@ -1,40 +1,18 @@
-import sqlite3
 import os
 import threading
 import time
 from datetime import date
 from flask import Flask, request
 import requests
+from db import get_conn, init_db, load_env
+from subscribers import (get_subscriber, add_subscriber,
+                          deactivate_subscriber)
 
 app = Flask(__name__)
-
-IS_LOCAL = os.path.exists(r"C:\mandi_bot")
-
-def load_env():
-    env = {}
-    env_path = r"C:\mandi_bot\.env"
-    if os.path.exists(env_path):
-        with open(env_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, v = line.split("=", 1)
-                    env[k.strip()] = v.strip()
-    for key in ["DATA_GOV_API_KEY", "ANTHROPIC_API_KEY",
-                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]:
-        if key not in env and os.environ.get(key):
-            env[key] = os.environ.get(key)
-    return env
-
 
 ENV       = load_env()
 BOT_TOKEN = ENV.get("TELEGRAM_BOT_TOKEN", "")
 BASE_URL  = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
-SUBSCRIBERS_DB = (r"C:\mandi_bot\data\subscribers.db" if IS_LOCAL
-                  else "/opt/render/project/src/data/subscribers.db")
-SESSIONS_DB    = (r"C:\mandi_bot\data\sessions.db" if IS_LOCAL
-                  else "/opt/render/project/src/data/sessions.db")
 
 DISTRICTS = {
     "1":  ("Karnal",      "Gharaunda,Kunjpura,Pipli,Thanesar"),
@@ -141,117 +119,72 @@ HELP_TRIGGERS = [
 ]
 
 REGISTRATION_STEPS = [
-    "awaiting_name",
-    "awaiting_district",
-    "awaiting_category",
-    "awaiting_crops_in_category",
+    "awaiting_name", "awaiting_district",
+    "awaiting_category", "awaiting_crops_in_category",
     "awaiting_more_categories",
 ]
 
 
-def init_sessions_db():
-    os.makedirs(os.path.dirname(SESSIONS_DB), exist_ok=True)
-    conn = sqlite3.connect(SESSIONS_DB)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            telegram_id        TEXT PRIMARY KEY,
-            step               TEXT,
-            name               TEXT,
-            district           TEXT,
-            mandis             TEXT,
-            selected_category  TEXT,
-            crops              TEXT,
-            updated            TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
 def get_session(telegram_id):
-    conn = sqlite3.connect(SESSIONS_DB)
-    conn.row_factory = sqlite3.Row
-    row = conn.execute(
-        "SELECT * FROM sessions WHERE telegram_id = ?",
-        (str(telegram_id),)
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT telegram_id, step, name, district, mandis,
+                   selected_category, crops, updated
+            FROM sessions WHERE telegram_id = %s
+        """, (str(telegram_id),))
+        cols = [d[0] for d in cur.description]
+        row  = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(zip(cols, row)) if row else None
+    except Exception as e:
+        print(f"[SESSION ERROR] get: {e}")
+        return None
 
 
 def set_session(telegram_id, **kwargs):
-    conn     = sqlite3.connect(SESSIONS_DB)
-    existing = get_session(telegram_id)
-    if existing:
-        fields = ", ".join(f"{k} = ?" for k in kwargs)
-        values = list(kwargs.values()) + [str(date.today()), str(telegram_id)]
-        conn.execute(
-            f"UPDATE sessions SET {fields}, updated = ? "
-            f"WHERE telegram_id = ?",
-            values
-        )
-    else:
-        kwargs["telegram_id"] = str(telegram_id)
-        kwargs["updated"]     = str(date.today())
-        cols         = ", ".join(kwargs.keys())
-        placeholders = ", ".join(["?"] * len(kwargs))
-        conn.execute(
-            f"INSERT INTO sessions ({cols}) VALUES ({placeholders})",
-            list(kwargs.values())
-        )
-    conn.commit()
-    conn.close()
+    try:
+        conn     = get_conn()
+        cur      = conn.cursor()
+        existing = get_session(telegram_id)
+        kwargs["updated"] = str(date.today())
+        if existing:
+            fields = ", ".join(f"{k} = %s" for k in kwargs)
+            values = list(kwargs.values()) + [str(telegram_id)]
+            cur.execute(
+                f"UPDATE sessions SET {fields} WHERE telegram_id = %s",
+                values
+            )
+        else:
+            kwargs["telegram_id"] = str(telegram_id)
+            cols         = ", ".join(kwargs.keys())
+            placeholders = ", ".join(["%s"] * len(kwargs))
+            cur.execute(
+                f"INSERT INTO sessions ({cols}) VALUES ({placeholders})",
+                list(kwargs.values())
+            )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[SESSION ERROR] set: {e}")
 
 
 def clear_session(telegram_id):
-    conn = sqlite3.connect(SESSIONS_DB)
-    conn.execute(
-        "DELETE FROM sessions WHERE telegram_id = ?",
-        (str(telegram_id),)
-    )
-    conn.commit()
-    conn.close()
-
-
-def save_subscriber(telegram_id, name, district, mandis, crops):
-    os.makedirs(os.path.dirname(SUBSCRIBERS_DB), exist_ok=True)
-    conn = sqlite3.connect(SUBSCRIBERS_DB)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS subscribers (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT,
-            telegram_id TEXT UNIQUE,
-            district    TEXT,
-            mandis      TEXT,
-            crops       TEXT,
-            active      INTEGER DEFAULT 1,
-            added_date  TEXT
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(
+            "DELETE FROM sessions WHERE telegram_id = %s",
+            (str(telegram_id),)
         )
-    """)
-    conn.execute("""
-        INSERT OR REPLACE INTO subscribers
-        (name, telegram_id, district, mandis, crops, active, added_date)
-        VALUES (?,?,?,?,?,1,?)
-    """, (
-        name, str(telegram_id), district,
-        mandis, crops, str(date.today())
-    ))
-    conn.commit()
-    conn.close()
-
-
-def get_subscriber(telegram_id):
-    if not os.path.exists(SUBSCRIBERS_DB):
-        return None
-    conn = sqlite3.connect(SUBSCRIBERS_DB)
-    conn.row_factory = sqlite3.Row
-    row = conn.execute(
-        "SELECT * FROM subscribers "
-        "WHERE telegram_id = ? AND active = 1",
-        (str(telegram_id),)
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else None
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[SESSION ERROR] clear: {e}")
 
 
 def send(chat_id, text):
@@ -298,7 +231,6 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
     if text_lower in BAND_TRIGGERS + HELP_TRIGGERS:
         return False
 
-    # step 1 -- name
     if step == "awaiting_name":
         if len(text_clean) < 2 or text_clean.isdigit():
             send(chat_id, "Apna naam batayein ji:")
@@ -311,7 +243,6 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
         )
         return True
 
-    # step 2 -- district
     if step == "awaiting_district":
         if text_clean not in DISTRICTS:
             send(chat_id,
@@ -333,17 +264,14 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
         )
         return True
 
-    # step 3 -- category
     if step == "awaiting_category":
         selected_cats = [
-            c.strip()
-            for c in text_clean.replace(" ", "").split(",")
+            c.strip() for c in text_clean.replace(" ", "").split(",")
         ]
         valid_cats = [c for c in selected_cats if c in CROP_CATEGORIES]
         if not valid_cats:
             send(chat_id,
-                f"Sirf number bhejein (1-4):\n\n"
-                f"{CATEGORY_LIST_TEXT}"
+                f"Sirf number bhejein (1-4):\n\n{CATEGORY_LIST_TEXT}"
             )
             return True
         crop_list = build_combined_crop_list(valid_cats)
@@ -358,20 +286,16 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
         )
         return True
 
-    # step 4 -- crops
     if step == "awaiting_crops_in_category":
         cat_keys      = session.get("selected_category", "").split(",")
         all_cat_crops = get_all_crops_from_categories(cat_keys)
         selected      = [
-            c.strip()
-            for c in text_clean.replace(" ", "").split(",")
+            c.strip() for c in text_clean.replace(" ", "").split(",")
         ]
         valid = [c for c in selected if c in all_cat_crops]
         if not valid:
             crop_list = build_combined_crop_list(cat_keys)
-            send(chat_id,
-                f"Sahi numbers bhejein ji:\n\n{crop_list}"
-            )
+            send(chat_id, f"Sahi numbers bhejein ji:\n\n{crop_list}")
             return True
 
         new_crops = ",".join(all_cat_crops[c] for c in valid)
@@ -391,7 +315,6 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
         )
         return True
 
-    # step 5 -- more or finish
     if step == "awaiting_more_categories":
         want_more = text_clean == "1" or text_lower in [
             "haan", "ha", "yes", "aur", "haan ji", "haa"
@@ -416,7 +339,7 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
             )
             return True
 
-        save_subscriber(chat_id, name, district, mandis, crops)
+        add_subscriber(chat_id, name, district, mandis, crops)
         clear_session(chat_id)
         crop_display = crops.replace(",", ", ")
 
@@ -446,7 +369,6 @@ def handle_message(chat_id, text, user_first_name):
           f"step={session.get('step') if session else None} "
           f"text='{text_clean}'")
 
-    # priority 1 -- registration flow
     if session and session.get("step") in REGISTRATION_STEPS:
         handled = handle_registration_step(
             chat_id, text_clean, session, user_first_name
@@ -454,7 +376,6 @@ def handle_message(chat_id, text, user_first_name):
         if handled:
             return
 
-    # priority 2 -- greeting
     if is_greeting(text_clean) or text_clean == "/start":
         existing = get_subscriber(chat_id)
         if existing:
@@ -484,7 +405,6 @@ def handle_message(chat_id, text, user_first_name):
         )
         return
 
-    # priority 3 -- /profile
     if text_clean == "/profile":
         sub = get_subscriber(chat_id)
         if sub:
@@ -504,7 +424,6 @@ def handle_message(chat_id, text, user_first_name):
             )
         return
 
-    # priority 4 -- bhav
     if text_lower in BHAV_TRIGGERS:
         sub = get_subscriber(chat_id)
         if not sub:
@@ -520,17 +439,8 @@ def handle_message(chat_id, text, user_first_name):
         ).start()
         return
 
-    # priority 5 -- /band
     if text_lower in BAND_TRIGGERS:
-        if os.path.exists(SUBSCRIBERS_DB):
-            conn = sqlite3.connect(SUBSCRIBERS_DB)
-            conn.execute(
-                "UPDATE subscribers SET active = 0 "
-                "WHERE telegram_id = ?",
-                (str(chat_id),)
-            )
-            conn.commit()
-            conn.close()
+        deactivate_subscriber(chat_id)
         clear_session(chat_id)
         send(chat_id,
             "Aapke alerts band kar diye gaye hain.\n\n"
@@ -539,7 +449,6 @@ def handle_message(chat_id, text, user_first_name):
         )
         return
 
-    # priority 6 -- /update
     if text_lower in UPDATE_TRIGGERS:
         clear_session(chat_id)
         set_session(chat_id, step="awaiting_name")
@@ -550,7 +459,6 @@ def handle_message(chat_id, text, user_first_name):
         )
         return
 
-    # priority 7 -- /help
     if text_lower in HELP_TRIGGERS:
         send(chat_id,
             "Haryana Mandi Bhav Bot\n\n"
@@ -566,7 +474,6 @@ def handle_message(chat_id, text, user_first_name):
         )
         return
 
-    # fallback
     send(chat_id,
         "Samajh nahi aaya ji.\n\n"
         "Bhav ke liye: /mera_bhav\n"
@@ -646,7 +553,7 @@ def index():
 
 
 if __name__ == "__main__":
-    init_sessions_db()
+    init_db()
     threading.Thread(target=keep_alive, daemon=True).start()
     print("[BOT] Starting webhook server on port 5000...")
     port = int(os.environ.get("PORT", 5000))

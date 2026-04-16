@@ -1,7 +1,7 @@
-import sqlite3
 import os
 from datetime import date, timedelta
-from fetcher import get_prices_for_date, get_todays_prices, get_mandis_in_db
+from fetcher import (get_prices_for_date, get_todays_prices,
+                     get_mandis_in_db)
 
 MSP = {
     "wheat":     2425,
@@ -58,21 +58,16 @@ def get_4day_avg(commodity, wanted_mandis=None):
                         prices.append(p["modal_price"])
                 else:
                     prices.append(p["modal_price"])
-    if not prices:
-        return None
-    return round(sum(prices) / len(prices))
+    return round(sum(prices) / len(prices)) if prices else None
 
 
 def get_mandi_coverage(subscriber):
-    wanted_mandis = [
-        m.strip().lower()
-        for m in subscriber["mandis"].split(",")
-    ]
-    today_mandis = get_mandis_in_db(date.today())
+    wanted  = [m.strip().lower() for m in subscriber["mandis"].split(",")]
+    present_in_db = get_mandis_in_db(date.today())
     present = []
     missing = []
-    for m in wanted_mandis:
-        if any(m in tm for tm in today_mandis):
+    for m in wanted:
+        if any(m in tm for tm in present_in_db):
             present.append(m.title())
         else:
             missing.append(m.title())
@@ -92,9 +87,7 @@ def build_crop_entry(commodity, price_list, wanted_mandis=None):
     avg_4day   = get_4day_avg(commodity, wanted_mandis)
     change_pct = None
     if avg_4day and avg_4day > 0:
-        change_pct = round(
-            ((avg_today - avg_4day) / avg_4day) * 100, 1
-        )
+        change_pct = round(((avg_today - avg_4day) / avg_4day) * 100, 1)
 
     if msp_diff is not None and msp_diff > 0:
         signal = "SELL"
@@ -137,11 +130,9 @@ def analyse():
             summary["crops"].append(entry)
 
     signal_order = {"SELL": 0, "NEUTRAL": 1, "WAIT": 2}
-    summary["crops"].sort(
-        key=lambda x: signal_order.get(x["signal"], 9)
-    )
+    summary["crops"].sort(key=lambda x: signal_order.get(x["signal"], 9))
 
-    print(f"[ANALYSE] {len(summary['crops'])} crops analysed")
+    print(f"[ANALYSE] {len(summary['crops'])} crops")
     for c in summary["crops"]:
         trend = (f"{c['week_change']:+.1f}% vs 4-day"
                  if c["week_change"] is not None else "no history")
@@ -158,23 +149,15 @@ def analyse_for_subscriber(subscriber):
     if not all_prices:
         return None
 
-    wanted_mandis = [
-        m.strip().lower()
-        for m in subscriber["mandis"].split(",")
-    ]
-    wanted_crops = [
-        c.strip().lower()
-        for c in subscriber["crops"].split(",")
-    ]
+    wanted_mandis = [m.strip().lower() for m in subscriber["mandis"].split(",")]
+    wanted_crops  = [c.strip().lower() for c in subscriber["crops"].split(",")]
 
-    # primary -- subscriber mandis + crops
     filtered = [
         p for p in all_prices
         if any(m in p["market"].lower() for m in wanted_mandis)
         and any(c in p["commodity"].lower() for c in wanted_crops)
     ]
 
-    # fallback 1 -- any mandi with their crops
     if not filtered:
         print(f"[ANALYSE] No mandi+crop match -- crop-only fallback")
         filtered = [
@@ -182,7 +165,6 @@ def analyse_for_subscriber(subscriber):
             if any(c in p["commodity"].lower() for c in wanted_crops)
         ]
 
-    # fallback 2 -- last 4 days
     if not filtered:
         print(f"[ANALYSE] No today data -- checking last 4 days")
         today = date.today()
@@ -194,8 +176,7 @@ def analyse_for_subscriber(subscriber):
                 and any(c in p["commodity"].lower() for c in wanted_crops)
             ]
             if filtered:
-                print(f"[ANALYSE] Found data from "
-                      f"{today - timedelta(days=i)}")
+                print(f"[ANALYSE] Using data from {today - timedelta(days=i)}")
                 break
 
     if not filtered:
@@ -222,14 +203,11 @@ def analyse_for_subscriber(subscriber):
             summary["crops"].append(entry)
 
     signal_order = {"SELL": 0, "NEUTRAL": 1, "WAIT": 2}
-    summary["crops"].sort(
-        key=lambda x: signal_order.get(x["signal"], 9)
-    )
+    summary["crops"].sort(key=lambda x: signal_order.get(x["signal"], 9))
 
     print(f"[ANALYSE] {subscriber['name']}: "
           f"{len(summary['crops'])} crops | "
-          f"present: {present_mandis} | "
-          f"missing: {missing_mandis}")
+          f"present: {present_mandis} | missing: {missing_mandis}")
 
     return summary
 
