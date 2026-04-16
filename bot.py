@@ -13,6 +13,7 @@ app = Flask(__name__)
 ENV       = load_env()
 BOT_TOKEN = ENV.get("TELEGRAM_BOT_TOKEN", "")
 BASE_URL  = f"https://api.telegram.org/bot{BOT_TOKEN}"
+ADMIN_ID  = "1756491671"
 
 DISTRICTS = {
     "1":  ("Karnal",      "Gharaunda,Kunjpura,Pipli,Thanesar"),
@@ -124,6 +125,10 @@ REGISTRATION_STEPS = [
     "awaiting_more_categories",
 ]
 
+ADMIN_COMMANDS = [
+    "/admin", "/stats", "/users", "/today",
+]
+
 
 def get_session(telegram_id):
     try:
@@ -224,6 +229,148 @@ def get_all_crops_from_categories(cat_keys):
     return merged
 
 
+def handle_admin(chat_id, text_lower):
+    if str(chat_id) != ADMIN_ID:
+        return False
+    if text_lower not in ADMIN_COMMANDS:
+        return False
+
+    if text_lower in ["/admin", "/stats"]:
+        try:
+            conn = get_conn()
+            cur  = conn.cursor()
+
+            cur.execute(
+                "SELECT COUNT(*) FROM subscribers WHERE active = 1"
+            )
+            active = cur.fetchone()[0]
+
+            cur.execute(
+                "SELECT COUNT(*) FROM subscribers WHERE active = 0"
+            )
+            inactive = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM subscribers")
+            total = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM sessions")
+            sessions = cur.fetchone()[0]
+
+            cur.execute("""
+                SELECT COUNT(DISTINCT market) FROM prices
+                WHERE fetch_date = CURRENT_DATE
+            """)
+            mandis_today = cur.fetchone()[0]
+
+            cur.execute("""
+                SELECT COUNT(*) FROM prices
+                WHERE fetch_date = CURRENT_DATE
+                AND is_fallback = 0
+            """)
+            fresh = cur.fetchone()[0]
+
+            cur.execute("""
+                SELECT COUNT(*) FROM prices
+                WHERE fetch_date = CURRENT_DATE
+                AND is_fallback = 1
+            """)
+            fallback = cur.fetchone()[0]
+
+            cur.execute("""
+                SELECT district, COUNT(*) as cnt
+                FROM subscribers WHERE active = 1
+                GROUP BY district ORDER BY cnt DESC
+            """)
+            districts = cur.fetchall()
+
+            cur.close()
+            conn.close()
+
+            district_text = "\n".join(
+                f"  {r[0]}: {r[1]}" for r in districts
+            ) or "  None yet"
+
+            msg = (
+                f"ADMIN STATS\n"
+                f"{'='*28}\n\n"
+                f"SUBSCRIBERS\n"
+                f"Active: {active}\n"
+                f"Unsubscribed: {inactive}\n"
+                f"Total ever: {total}\n"
+                f"Mid-registration: {sessions}\n\n"
+                f"TODAY DATA\n"
+                f"Mandis covered: {mandis_today}\n"
+                f"Fresh records: {fresh}\n"
+                f"Fallback records: {fallback}\n\n"
+                f"BY DISTRICT\n{district_text}"
+            )
+            send(chat_id, msg)
+        except Exception as e:
+            send(chat_id, f"Stats error: {e}")
+        return True
+
+    if text_lower == "/users":
+        try:
+            conn = get_conn()
+            cur  = conn.cursor()
+            cur.execute("""
+                SELECT name, district, crops, added_date, active
+                FROM subscribers ORDER BY added_date DESC
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+
+            if not rows:
+                send(chat_id, "No subscribers yet.")
+                return True
+
+            lines = ["ALL SUBSCRIBERS\n"]
+            for r in rows:
+                status = "Active" if r[4] == 1 else "Inactive"
+                lines.append(
+                    f"{r[0]} | {r[1]} | {status}\n"
+                    f"  Crops: {r[2]}\n"
+                    f"  Joined: {r[3]}\n"
+                )
+            full_msg = "\n".join(lines)
+            if len(full_msg) > 4000:
+                full_msg = full_msg[:4000] + "\n...(truncated)"
+            send(chat_id, full_msg)
+        except Exception as e:
+            send(chat_id, f"Users error: {e}")
+        return True
+
+    if text_lower == "/today":
+        try:
+            conn = get_conn()
+            cur  = conn.cursor()
+            cur.execute("""
+                SELECT market, COUNT(*) as cnt
+                FROM prices
+                WHERE fetch_date = CURRENT_DATE
+                AND is_fallback = 0
+                GROUP BY market ORDER BY market
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+
+            if not rows:
+                send(chat_id, "No fresh data today yet.\nRun main.py to fetch.")
+                return True
+
+            lines = [f"TODAY DATA ({len(rows)} mandis)\n"]
+            for r in rows:
+                lines.append(f"  {r[0]}: {r[1]} crops")
+            send(chat_id, "\n".join(lines)[:4000])
+        except Exception as e:
+            send(chat_id, f"Today error: {e}")
+        return True
+
+    return False
+
+
 def handle_registration_step(chat_id, text_clean, session, user_first_name):
     step       = session.get("step")
     text_lower = text_clean.lower().strip()
@@ -295,7 +442,9 @@ def handle_registration_step(chat_id, text_clean, session, user_first_name):
         valid = [c for c in selected if c in all_cat_crops]
         if not valid:
             crop_list = build_combined_crop_list(cat_keys)
-            send(chat_id, f"Sahi numbers bhejein ji:\n\n{crop_list}")
+            send(chat_id,
+                f"Sahi numbers bhejein ji:\n\n{crop_list}"
+            )
             return True
 
         new_crops = ",".join(all_cat_crops[c] for c in valid)
@@ -369,6 +518,11 @@ def handle_message(chat_id, text, user_first_name):
           f"step={session.get('step') if session else None} "
           f"text='{text_clean}'")
 
+    # priority 0 -- admin commands
+    if handle_admin(chat_id, text_lower):
+        return
+
+    # priority 1 -- registration flow
     if session and session.get("step") in REGISTRATION_STEPS:
         handled = handle_registration_step(
             chat_id, text_clean, session, user_first_name
@@ -376,6 +530,7 @@ def handle_message(chat_id, text, user_first_name):
         if handled:
             return
 
+    # priority 2 -- greeting / start
     if is_greeting(text_clean) or text_clean == "/start":
         existing = get_subscriber(chat_id)
         if existing:
@@ -405,6 +560,7 @@ def handle_message(chat_id, text, user_first_name):
         )
         return
 
+    # priority 3 -- /profile
     if text_clean == "/profile":
         sub = get_subscriber(chat_id)
         if sub:
@@ -424,6 +580,7 @@ def handle_message(chat_id, text, user_first_name):
             )
         return
 
+    # priority 4 -- bhav
     if text_lower in BHAV_TRIGGERS:
         sub = get_subscriber(chat_id)
         if not sub:
@@ -439,6 +596,7 @@ def handle_message(chat_id, text, user_first_name):
         ).start()
         return
 
+    # priority 5 -- /band
     if text_lower in BAND_TRIGGERS:
         deactivate_subscriber(chat_id)
         clear_session(chat_id)
@@ -449,6 +607,7 @@ def handle_message(chat_id, text, user_first_name):
         )
         return
 
+    # priority 6 -- /update
     if text_lower in UPDATE_TRIGGERS:
         clear_session(chat_id)
         set_session(chat_id, step="awaiting_name")
@@ -459,6 +618,7 @@ def handle_message(chat_id, text, user_first_name):
         )
         return
 
+    # priority 7 -- /help
     if text_lower in HELP_TRIGGERS:
         send(chat_id,
             "Haryana Mandi Bhav Bot\n\n"
@@ -474,6 +634,7 @@ def handle_message(chat_id, text, user_first_name):
         )
         return
 
+    # fallback
     send(chat_id,
         "Samajh nahi aaya ji.\n\n"
         "Bhav ke liye: /mera_bhav\n"
@@ -511,7 +672,10 @@ def keep_alive():
     time.sleep(60)
     while True:
         try:
-            requests.get("https://mandi-bot.onrender.com/", timeout=10)
+            requests.get(
+                "https://mandi-bot.onrender.com/",
+                timeout=10
+            )
             print("[KEEPALIVE] Pinged")
         except Exception as e:
             print(f"[KEEPALIVE ERROR] {e}")
