@@ -710,7 +710,7 @@ def handle_registration_step(chat_id, text_clean, session,
 
         print(f"[REG] Saving: name={name} district={district} "
               f"crops={crops[:50]}")
-        add_subscriber(chat_id, name, district, mandis, crops)
+        add_subscriber(name, chat_id, district, mandis, crops)
         clear_session(chat_id)
 
         # verify it saved
