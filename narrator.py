@@ -1,6 +1,8 @@
 import os
+import re
+import random
 import requests
-from datetime import date
+from datetime import datetime
 
 
 def load_env():
@@ -14,7 +16,8 @@ def load_env():
                     k, v = line.split("=", 1)
                     env[k.strip()] = v.strip()
     for key in ["DATA_GOV_API_KEY", "ANTHROPIC_API_KEY",
-                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]:
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+                "DATABASE_URL"]:
         if key not in env and os.environ.get(key):
             env[key] = os.environ.get(key)
     return env
@@ -23,118 +26,132 @@ def load_env():
 ENV           = load_env()
 ANTHROPIC_KEY = ENV.get("ANTHROPIC_API_KEY", "")
 
+HARYANVI_QUOTES = [
+    "जै बाबा रामदेव! खेती में खुशहाली रहे।",
+    "मेहनत का फल मीठा होता है — बढ़ते रहो।",
+    "हरियाणा का किसान देश की शान है।",
+    "फसल अच्छी हो, दाम अच्छे हों — यही दुआ है।",
+    "जमीन से जुड़े रहो, तरक्की होगी।",
+    "किसान खुश तो हरियाणा खुश।",
+    "मेहनत कर, फल पाएगा — यही खेती का धर्म है।",
+]
 
-def build_prompt(summary):
-    crops_text = ""
-    for c in summary["crops"][:8]:
-        if c["msp_diff"] is not None:
-            msp_line = (
-                f"MSP se Rs.{abs(c['msp_diff'])} "
-                f"{'upar' if c['msp_diff'] > 0 else 'neeche'}"
-            )
-        else:
-            msp_line = "MSP laagu nahi"
-        trend = (
-            f"{c['week_change']:+.1f}% (4-din avg se)"
-            if c["week_change"] is not None
-            else "naya data"
-        )
-        crops_text += (
-            f"\n- {c['commodity']}: Rs.{c['avg_modal']}/quintal"
-            f" | {msp_line} | {trend}"
-            f" | best: {c['best_market']} Rs.{c['best_price']}"
-            f" | {c['signal']}"
-        )
 
-    return f"""You are an agricultural advisor for Haryana farmers.
-Write a WhatsApp message in Hindi (Devanagari script).
+def get_quote():
+    return random.choice(HARYANVI_QUOTES)
 
-Date: {summary['date']}
-Data:{crops_text}
 
-Rules:
-1. Hindi Devanagari script
-2. First line: date + Haryana + Mandi Bhav
-3. One line per crop: price, MSP comparison, trend, signal
-4. SELL crops first
-5. Last line: short advice
-6. Max 600 characters
-7. Simple farmer language
-
-Write the message:"""
+def format_date(date_str):
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        months = {
+            1: "जनवरी", 2: "फरवरी", 3: "मार्च",
+            4: "अप्रैल", 5: "मई", 6: "जून",
+            7: "जुलाई", 8: "अगस्त", 9: "सितंबर",
+            10: "अक्टूबर", 11: "नवंबर", 12: "दिसंबर"
+        }
+        return f"{d.day} {months[d.month]} {d.year}"
+    except Exception:
+        return date_str
 
 
 def build_personalised_prompt(summary):
-    district      = summary.get("district", "Haryana")
-    present       = summary.get("present_mandis", [])
-    missing       = summary.get("missing_mandis", [])
-    fallback_used = summary.get("fallback_used", False)
+    district       = summary.get("district", "हरियाणा")
+    today_mandis   = summary.get("today_mandis", [])
+    fallback_mandi = summary.get("fallback_mandis", {})
+    missing_mandis = summary.get("missing_mandis", [])
+    date_str       = format_date(summary["date"])
+    quote          = get_quote()
 
-    if missing and fallback_used:
-        data_note = (
-            f"Aaj ki report nahi aayi: {', '.join(missing)}. "
-            f"Kal ka data use kiya gaya."
-        )
-    elif missing:
-        data_note = (
-            f"Aaj report aayi: {', '.join(present)}. "
-            f"Nahi aayi: {', '.join(missing)}."
-        )
-    else:
-        data_note = f"Aaj ki taaza report: {', '.join(present)}."
-
+    # build crop lines for prompt
     crops_text = ""
     for c in summary["crops"]:
         if c["msp_diff"] is not None:
-            msp_line = (
-                f"MSP se Rs.{abs(c['msp_diff'])} "
-                f"{'upar' if c['msp_diff'] > 0 else 'neeche'}"
-            )
+            diff_dir = "ऊपर" if c["msp_diff"] > 0 else "नीचे"
+            msp_line = f"MSP से ₹{abs(c['msp_diff'])} {diff_dir}"
+            sig      = "✅ बेचें" if c["msp_diff"] > 0 else "⏳ रुकें"
         else:
-            msp_line = "MSP laagu nahi"
+            msp_line = "MSP लागू नहीं"
+            sig      = "ℹ️"
 
         if c["week_change"] is not None:
-            trend = f"{c['week_change']:+.1f}% (4-din se)"
+            trend = f"4 दिन से {c['week_change']:+.1f}%"
         elif c.get("avg_4day"):
-            trend = f"4-din avg: Rs.{c['avg_4day']}"
+            trend = f"औसत ₹{c['avg_4day']}"
         else:
-            trend = "pehla din"
+            trend = "पहला दिन"
+
+        best = ""
+        if c.get("best_market"):
+            best = f"बेस्ट: {c['best_market']} ₹{c['best_price']}"
 
         crops_text += (
-            f"\n- {c['commodity']}: Rs.{c['avg_modal']}/quintal"
+            f"\n• {c['commodity']}: ₹{c['avg_modal']}/क्विंटल"
             f" | {msp_line} | {trend}"
-            f" | best: {c['best_market']} Rs.{c['best_price']}"
-            f" | {c['signal']}"
+            f" | {best} | {sig}"
         )
 
-    return f"""You are an agricultural advisor for Haryana farmers.
-Write a WhatsApp message in Hindi (Devanagari script).
+    # build mandi status section
+    mandi_lines = []
+    if today_mandis:
+        mandi_lines.append(
+            f"आज का data: {', '.join(today_mandis)}"
+        )
+    for mandi, info in fallback_mandi.items():
+        mandi_lines.append(
+            f"{mandi}: {info['status']}"
+        )
+    if missing_mandis:
+        mandi_lines.append(
+            f"data नहीं मिला (4 दिन में): "
+            f"{', '.join(missing_mandis)}"
+        )
+    mandi_section = "\n".join(mandi_lines)
 
-Farmer district: {district}
-Date: {summary['date']}
-Mandi status: {data_note}
+    return f"""हरियाणा किसान मंडी भाव message लिखो।
 
-Crops:{crops_text}
+जिला: {district}
+तारीख: {date_str}
 
-Rules:
-1. Hindi Devanagari script only
-2. First line: date + {district} + Mandi Bhav
-3. One line per crop: price, MSP diff, best mandi, signal
-4. SELL crops first
-5. If mandis missing -- add ONE short warning line
-6. Last line: short actionable advice
-7. Max 550 characters
-8. Simple language a farmer understands
+फसल data:
+{crops_text}
 
-Write the message:"""
+मंडी की स्थिति:
+{mandi_section}
+
+नियम — सख्ती से follow करो:
+1. पहली लाइन: "राम राम किसान भाइयों! 🙏"
+2. दूसरी लाइन: "{date_str} | {district} | मंडी भाव"
+3. खाली लाइन
+4. हर फसल — emoji, नाम, भाव, MSP तुलना, signal (SELL वाली पहले)
+5. खाली लाइन
+6. मंडी स्थिति — किस मंडी का आज data है, किसका कल का, किसका नहीं मिला
+7. खाली लाइन
+8. एक सलाह की लाइन
+9. आखिरी लाइन exactly: "{quote}"
+10. कोई ** bold ** नहीं — plain text only
+11. "WhatsApp Message" या "Character count" बिल्कुल नहीं
+12. --- या extra symbols नहीं
+13. अधिकतम 550 अक्षर
+
+Message:"""
+
+
+def clean_message(text):
+    text = text.replace("**", "")
+    text = re.sub(r'\*?Character count.*', '', text)
+    text = re.sub(r'WhatsApp Message:?\*?\*?', '', text)
+    text = re.sub(r'-{3,}', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 
 def generate_hindi_message(summary, prompt_override=None):
-    if not ANTHROPIC_KEY or ANTHROPIC_KEY == "your_key_here":
-        print("[NARRATOR] No key -- using fallback")
+    if not ANTHROPIC_KEY:
+        print("[NARRATOR] No API key -- using fallback")
         return build_fallback_message(summary)
 
-    prompt = prompt_override if prompt_override else build_prompt(summary)
+    prompt = prompt_override or build_personalised_prompt(summary)
 
     headers = {
         "x-api-key":         ANTHROPIC_KEY,
@@ -142,9 +159,9 @@ def generate_hindi_message(summary, prompt_override=None):
         "content-type":      "application/json",
     }
     body = {
-        "model":    "claude-haiku-4-5-20251001",
-        "max_tokens": 800,
-        "messages": [{"role": "user", "content": prompt}],
+        "model":      "claude-haiku-4-5-20251001",
+        "max_tokens": 700,
+        "messages":   [{"role": "user", "content": prompt}],
     }
 
     try:
@@ -152,66 +169,63 @@ def generate_hindi_message(summary, prompt_override=None):
             "https://api.anthropic.com/v1/messages",
             headers=headers,
             json=body,
-            timeout=20,
+            timeout=25,
         )
         r.raise_for_status()
-        data    = r.json()
-        message = data["content"][0]["text"].strip()
+        message = r.json()["content"][0]["text"].strip()
+        message = clean_message(message)
         print(f"[NARRATOR] Generated {len(message)} chars")
         return message
     except Exception as e:
-        print(f"[NARRATOR ERROR] {e} -- using fallback")
+        print(f"[NARRATOR ERROR] {e} -- fallback")
         return build_fallback_message(summary)
 
 
 def build_fallback_message(summary):
-    district = summary.get("district", "Haryana")
-    today    = summary["date"]
-    missing  = summary.get("missing_mandis", [])
-    present  = summary.get("present_mandis", [])
+    district       = summary.get("district", "हरियाणा")
+    date_str       = format_date(summary["date"])
+    today_mandis   = summary.get("today_mandis", [])
+    fallback_mandi = summary.get("fallback_mandis", {})
+    missing_mandis = summary.get("missing_mandis", [])
 
-    lines = [f"Mandi Bhav -- {district} -- {today}\n"]
+    lines = [
+        "राम राम किसान भाइयों! 🙏",
+        f"{date_str} | {district} | मंडी भाव",
+        "",
+    ]
 
     for c in summary["crops"][:6]:
         msp_str = ""
         if c["msp_diff"] is not None:
-            d = "upar" if c["msp_diff"] > 0 else "neeche"
-            msp_str = f" (MSP se Rs.{abs(c['msp_diff'])} {d})"
-        trend_str = ""
-        if c["week_change"] is not None:
-            trend_str = f" | {c['week_change']:+.1f}%"
-        sig = " -- Bechen" if c["signal"] == "SELL" else ""
+            d = "ऊपर" if c["msp_diff"] > 0 else "नीचे"
+            msp_str = f" | MSP से ₹{abs(c['msp_diff'])} {d}"
+        sig = " ✅ बेचें" if c["signal"] == "SELL" else \
+              " ⏳ रुकें" if c["signal"] == "WAIT" else ""
         lines.append(
-            f"- {c['commodity']}: Rs.{c['avg_modal']}/q"
-            f"{msp_str}{trend_str}{sig}"
+            f"• {c['commodity']}: ₹{c['avg_modal']}/क्विंटल"
+            f"{msp_str}{sig}"
         )
 
-    if summary["crops"]:
-        lines.append(
-            f"\nBest mandi: {summary['crops'][0]['best_market']}"
-        )
-    if missing:
-        lines.append(f"Aaj report nahi aayi: {', '.join(missing)}")
-    if present:
-        lines.append(f"Data: {', '.join(present)}")
-    if summary.get("fallback_used"):
-        lines.append("(Kuch data kal ka hai)")
+    lines.append("")
 
+    # mandi status
+    if today_mandis:
+        lines.append(f"✅ आज का data: {', '.join(today_mandis)}")
+    for mandi, info in fallback_mandi.items():
+        lines.append(f"⚠️ {mandi}: {info['status']} use हुआ")
+    if missing_mandis:
+        lines.append(
+            f"❌ data नहीं मिला: {', '.join(missing_mandis)}"
+        )
+
+    lines.append("")
+    lines.append(get_quote())
     return "\n".join(lines)
-
-
-def run(summary, prompt_override=None):
-    message = generate_hindi_message(summary, prompt_override)
-    print("\n" + "=" * 50)
-    print("MESSAGE PREVIEW:")
-    print("=" * 50)
-    print(message)
-    print("=" * 50)
-    return message
 
 
 if __name__ == "__main__":
     from analyser import analyse
     summary = analyse()
     if summary:
-        run(summary)
+        msg = generate_hindi_message(summary)
+        print(msg)

@@ -17,19 +17,32 @@ BOT_TOKEN = ENV.get("TELEGRAM_BOT_TOKEN", "")
 BASE_URL  = f"https://api.telegram.org/bot{BOT_TOKEN}"
 ADMIN_ID  = "1756491671"
 
+# Exact mandi names as they appear in Agmarknet API
 DISTRICTS = {
-    "1":  ("Karnal",      "Gharaunda,Kunjpura,Pipli,Thanesar"),
-    "2":  ("Kurukshetra", "Thanesar,Pehowa,Shahabad,Ladwa"),
-    "3":  ("Ambala",      "Ambala City APMC,Ambala Cantt. APMC,Naraingarh"),
-    "4":  ("Panipat",     "Panipat APMC,Ganaur,Samalkha"),
-    "5":  ("Sirsa",       "Sirsa APMC,Ellanabad APMC,Rania"),
-    "6":  ("Rohtak",      "Gohana,Sonepat,Jhajjar"),
-    "7":  ("Hisar",       "Hissar APMC,Hansi,Barwala"),
-    "8":  ("Sonepat",     "Sonepat APMC,Gohana,Ganaur"),
-    "9":  ("Fatehabad",   "Fatehabad APMC,Ratia,Tohana"),
-    "10": ("Jind",        "Jind APMC,Narwana,Safidon"),
-    "11": ("Kaithal",     "Kaithal,Pundri,Guhla"),
-    "12": ("Yamunanagar", "Jagadhri APMC,Sadhaura,Shahzadpur"),
+    "1":  ("Karnal",
+           "Gharaunda APMC,Indri APMC"),
+    "2":  ("Kurukshetra",
+           "Babain APMC,Ladwa APMC,Pehowa APMC,Pipli APMC,Shahabad APMC,Thanesar APMC"),
+    "3":  ("Ambala",
+           "Ambala Cantt. APMC,Ambala City APMC,Mullana APMC,Naraingarh APMC,Shahzadpur APMC"),
+    "4":  ("Panipat",
+           "Bapauli APMC,Madlauda APMC,Panipat APMC,Samalkha APMC"),
+    "5":  ("Sirsa",
+           "Ellanabad APMC,Rania APMC"),
+    "6":  ("Rohtak",
+           "Meham APMC,Rohtak APMC"),
+    "7":  ("Hisar",
+           "Barwala(Hisar) APMC,Hansi APMC,Hissar APMC,Narnaund APMC,Uklana APMC"),
+    "8":  ("Sonepat",
+           "Ganaur APMC,Gohana APMC,Sonepat APMC"),
+    "9":  ("Fatehabad",
+           "Fatehabad APMC,Jakhal APMC"),
+    "10": ("Jind",
+           "Jind APMC,Narwana APMC,Pillukhera APMC,Safidon APMC"),
+    "11": ("Kaithal",
+           "Cheeka APMC,Dhand APMC,Kaithal APMC,Kalayat APMC,Pai APMC,Siwan APMC"),
+    "12": ("Yamunanagar",
+           "Chhachrauli APMC,Sadhaura APMC"),
 }
 
 DISTRICT_ALIASES = {
