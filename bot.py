@@ -32,7 +32,6 @@ DISTRICTS = {
     "12": ("Yamunanagar", "Jagadhri APMC,Sadhaura,Shahzadpur"),
 }
 
-# District name aliases -- accept text input
 DISTRICT_ALIASES = {
     "karnal": "1", "kernal": "1",
     "kurukshetra": "2", "kurukshetar": "2",
@@ -48,7 +47,20 @@ DISTRICT_ALIASES = {
     "yamunanagar": "12", "jagadhri": "12",
 }
 
-# Category aliases -- accept text input
+CROP_CATEGORIES = {
+    "1": ("अनाज (Grains)",
+          ["Wheat", "Mustard", "Barley", "Paddy",
+           "Maize", "Bajra", "Sunflower"]),
+    "2": ("सब्जियां (Vegetables)",
+          ["Onion", "Potato", "Tomato", "Cucumbar(Kheera)",
+           "Garlic", "Ginger", "Bottle Gourd", "Brinjal"]),
+    "3": ("फल (Fruits)",
+          ["Apple", "Banana", "Chikoos(Sapota)",
+           "Mango", "Guava"]),
+    "4": ("अन्य (Others)",
+          ["Dry Fodder", "Green Fodder", "Cotton", "Sugarcane"]),
+}
+
 CATEGORY_ALIASES = {
     "anaj": "1", "grain": "1", "grains": "1",
     "gehun": "1", "wheat": "1", "sarson": "1",
@@ -60,36 +72,21 @@ CATEGORY_ALIASES = {
     "chara": "4", "fodder": "4",
 }
 
-# Category = ALL crops in that category (no individual selection)
-CROP_CATEGORIES = {
-    "1": ("Anaj (Grains)",
-          ["Wheat", "Mustard", "Barley", "Paddy",
-           "Maize", "Bajra", "Sunflower"]),
-    "2": ("Sabziyan (Vegetables)",
-          ["Onion", "Potato", "Tomato", "Cucumbar(Kheera)",
-           "Garlic", "Ginger", "Bottle Gourd", "Brinjal"]),
-    "3": ("Phal (Fruits)",
-          ["Apple", "Banana", "Chikoos(Sapota)",
-           "Mango", "Guava"]),
-    "4": ("Anya (Others)",
-          ["Dry Fodder", "Green Fodder", "Cotton", "Sugarcane"]),
-}
-
 DISTRICT_LIST_TEXT = "\n".join(
     f"{k}. {v[0]}" for k, v in DISTRICTS.items()
 )
 
 CATEGORY_LIST_TEXT = (
-    "1. Anaj / अनाज\n"
-    "   (Gehun, Sarson, Jau, Paddy, Makka, Bajra)\n\n"
-    "2. Sabziyan / सब्जियां\n"
-    "   (Pyaaz, Aloo, Tamatar, Kheera, Lahsun)\n\n"
-    "3. Phal / फल\n"
-    "   (Seb, Kela, Chikoo, Aam, Amrood)\n\n"
-    "4. Anya / अन्य\n"
-    "   (Chara, Cotton, Ganna)\n\n"
-    "Number ya naam bhejein: 1 ya Anaj\n"
-    "Ek se zyada: 1,2 ya Anaj,Phal"
+    "1. अनाज\n"
+    "   (गेहूं, सरसों, जौ, धान, मक्का, बाजरा)\n\n"
+    "2. सब्जियां\n"
+    "   (प्याज, आलू, टमाटर, खीरा, लहसुन)\n\n"
+    "3. फल\n"
+    "   (सेब, केला, चीकू, आम, अमरूद)\n\n"
+    "4. अन्य\n"
+    "   (चारा, कपास, गन्ना)\n\n"
+    "Number bhejein: 1, 2, 3, ya 4\n"
+    "Ek se zyada: 1,2"
 )
 
 GREETINGS = [
@@ -133,49 +130,51 @@ REGISTRATION_STEPS = [
 ]
 
 ADMIN_COMMANDS = [
-    "/admin", "/stats", "/users", "/today", "/bhav"
+    "/admin", "/stats", "/users", "/today",
+    "/bhav", "/health"
 ]
 
 
 def resolve_district(text):
-    """Accept '1', '1. Karnal', 'karnal' etc"""
     t = text.strip().lower()
-    t = t.lstrip("0123456789. ").strip()
-    if t in DISTRICT_ALIASES:
-        return DISTRICT_ALIASES[t]
-    # try number
+    # strip leading numbers and dots like "1." or "1. "
+    import re
+    t_clean = re.sub(r'^\d+[\.\)]\s*', '', t).strip()
+    if t_clean in DISTRICT_ALIASES:
+        return DISTRICT_ALIASES[t_clean]
+    # try pure number
     num = text.strip().split(".")[0].strip()
     if num in DISTRICTS:
         return num
+    # try original lowered
+    if t in DISTRICT_ALIASES:
+        return DISTRICT_ALIASES[t]
     return None
 
 
 def resolve_categories(text):
-    """Accept '1', '1,2', 'anaj', 'anaj,phal' etc"""
-    parts = [p.strip().lower().lstrip("0123456789. ").strip()
-             for p in text.replace(" ", "").split(",")]
+    import re
+    parts = [p.strip() for p in text.split(",")]
     result = []
     for part in parts:
-        # try alias
-        if part in CATEGORY_ALIASES:
-            result.append(CATEGORY_ALIASES[part])
-        # try stripping to number
-        num = part.lstrip("abcdefghijklmnopqrstuvwxyz").strip()
-        if not num:
-            # try as pure number from original
-            num = part
+        p = part.strip().lower()
+        p_clean = re.sub(r'^\d+[\.\)]\s*', '', p).strip()
+        if p_clean in CATEGORY_ALIASES:
+            result.append(CATEGORY_ALIASES[p_clean])
+            continue
+        if p in CATEGORY_ALIASES:
+            result.append(CATEGORY_ALIASES[p])
+            continue
+        num = p.split(".")[0].strip()
         if num in CROP_CATEGORIES:
             result.append(num)
-    # also try original text as numbers
-    for part in text.replace(" ", "").split(","):
-        p = part.strip()
-        if p in CROP_CATEGORIES and p not in result:
+            continue
+        if p in CROP_CATEGORIES:
             result.append(p)
     return list(dict.fromkeys(result))
 
 
 def get_crops_for_categories(cat_keys):
-    """Returns all crops for selected categories"""
     all_crops = []
     for key in cat_keys:
         if key in CROP_CATEGORIES:
@@ -246,7 +245,7 @@ def clear_session(telegram_id):
 
 
 def send(chat_id, text):
-    payload = {"chat_id": chat_id, "text": text}
+    payload = {"chat_id": str(chat_id), "text": text}
     try:
         r = requests.post(
             f"{BASE_URL}/sendMessage",
@@ -254,7 +253,7 @@ def send(chat_id, text):
         )
         print(f"[SEND] to={chat_id} status={r.status_code}")
         if r.status_code != 200:
-            print(f"[SEND FAIL] {r.text[:200]}")
+            print(f"[SEND FAIL] {r.text[:300]}")
     except Exception as e:
         print(f"[SEND ERROR] {e}")
 
@@ -279,54 +278,65 @@ def is_valid_name(text):
     return True
 
 
-def get_bhav_for_subscriber(subscriber):
-    """Fetch and send bhav for a subscriber"""
+def get_bhav_message(subscriber):
     try:
+        from fetcher import get_todays_prices
         from analyser import analyse_for_subscriber
         from narrator import (generate_hindi_message,
                                build_personalised_prompt)
+
+        # check if today's data exists
+        prices = get_todays_prices()
+        if not prices:
+            print("[BHAV] No prices in DB -- fetching now...")
+            from fetcher import run as fetch_run
+            fetch_run()
+
         summary = analyse_for_subscriber(subscriber)
-        if summary:
-            prompt  = build_personalised_prompt(summary)
-            message = generate_hindi_message(
-                summary, prompt_override=prompt
-            )
-            return message
-        return None
+        if not summary or not summary.get("crops"):
+            print(f"[BHAV] No summary for {subscriber['name']}")
+            return None
+        prompt  = build_personalised_prompt(summary)
+        message = generate_hindi_message(
+            summary, prompt_override=prompt
+        )
+        return message
     except Exception as e:
         print(f"[BHAV ERROR] {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
 def run_daily_pipeline():
-    """Runs at 6:30 AM IST -- called by APScheduler"""
-    print("[SCHEDULER] Running daily pipeline...")
+    print("[PIPELINE] Starting daily pipeline...")
     try:
         from fetcher import run as fetch_run
         prices = fetch_run()
         if not prices:
-            print("[SCHEDULER] No prices today")
+            print("[PIPELINE] No prices fetched")
             return
 
         subscribers = get_active_subscribers()
-        print(f"[SCHEDULER] Sending to {len(subscribers)} subscribers")
+        print(f"[PIPELINE] {len(subscribers)} subscribers")
 
         for sub in subscribers:
             try:
-                message = get_bhav_for_subscriber(sub)
-                if message:
-                    send(sub["telegram_id"], message)
-                    print(f"[SCHEDULER] Sent to {sub['name']}")
+                msg = get_bhav_message(sub)
+                if msg:
+                    send(sub["telegram_id"], msg)
+                    print(f"[PIPELINE] Sent to {sub['name']}")
                 else:
                     send(sub["telegram_id"],
-                        "Aaj aapke jile ka mandi data nahi aaya.\n"
-                        "Kal subah phir milega.")
+                        "आज आपके जिले का मंडी डेटा नहीं आया।\n"
+                        "कल सुबह 6:30 बजे फिर मिलेगा।"
+                    )
             except Exception as e:
-                print(f"[SCHEDULER] Error for {sub['name']}: {e}")
+                print(f"[PIPELINE] Error for {sub['name']}: {e}")
 
-        print("[SCHEDULER] Daily pipeline complete")
+        print("[PIPELINE] Done")
     except Exception as e:
-        print(f"[SCHEDULER ERROR] {e}")
+        print(f"[PIPELINE ERROR] {e}")
         import traceback
         traceback.print_exc()
 
@@ -339,6 +349,7 @@ def handle_admin(chat_id, text_lower):
 
     today_str = str(date.today())
 
+    # /stats
     if text_lower in ["/admin", "/stats"]:
         try:
             conn = get_conn()
@@ -359,7 +370,7 @@ def handle_admin(chat_id, text_lower):
                 SELECT COUNT(DISTINCT market) FROM prices
                 WHERE fetch_date = %s
             """, (today_str,))
-            mandis_today = cur.fetchone()[0]
+            mandis = cur.fetchone()[0]
             cur.execute("""
                 SELECT COUNT(*) FROM prices
                 WHERE fetch_date = %s AND is_fallback = 0
@@ -371,36 +382,35 @@ def handle_admin(chat_id, text_lower):
             """, (today_str,))
             fallback = cur.fetchone()[0]
             cur.execute("""
-                SELECT district, COUNT(*) as cnt
-                FROM subscribers WHERE active = 1
-                GROUP BY district ORDER BY cnt DESC
+                SELECT district, COUNT(*) FROM subscribers
+                WHERE active=1 GROUP BY district ORDER BY 2 DESC
             """)
-            districts = cur.fetchall()
+            dists = cur.fetchall()
             cur.close()
             conn.close()
 
-            dist_text = "\n".join(
-                f"  {r[0]}: {r[1]}" for r in districts
+            dist_txt = "\n".join(
+                f"  {r[0]}: {r[1]}" for r in dists
             ) or "  Koi nahi"
 
             send(chat_id,
-                f"ADMIN STATS\n"
-                f"{'='*28}\n\n"
-                f"SUBSCRIBERS\n"
+                f"ADMIN STATS\n{'='*25}\n\n"
+                f"Subscribers\n"
                 f"Active: {active}\n"
                 f"Unsubscribed: {inactive}\n"
-                f"Total ever: {total}\n"
-                f"Mid-registration: {sessions}\n\n"
-                f"TODAY ({today_str})\n"
-                f"Mandis: {mandis_today}\n"
-                f"Fresh records: {fresh}\n"
-                f"Fallback records: {fallback}\n\n"
-                f"BY DISTRICT\n{dist_text}"
+                f"Total: {total}\n"
+                f"Mid-reg: {sessions}\n\n"
+                f"Today ({today_str})\n"
+                f"Mandis: {mandis}\n"
+                f"Fresh: {fresh}\n"
+                f"Fallback: {fallback}\n\n"
+                f"By District\n{dist_txt}"
             )
         except Exception as e:
             send(chat_id, f"Stats error: {e}")
         return True
 
+    # /users
     if text_lower == "/users":
         try:
             conn = get_conn()
@@ -420,32 +430,31 @@ def handle_admin(chat_id, text_lower):
                 send(chat_id, "Abhi koi subscriber nahi hai.")
                 return True
 
-            lines = [f"SUBSCRIBERS ({len(rows)} total)\n"]
+            lines = [f"Subscribers ({len(rows)} total)\n"]
             for r in rows:
                 name, tid, dist, crops, joined, active = r
                 status = "Active" if active == 1 else "Inactive"
+                crop_count = len([c for c in (crops or "").split(",") if c])
                 lines.append(
                     f"{name or '?'} [{status}]\n"
                     f"  ID: {tid}\n"
                     f"  Jila: {dist or '?'}\n"
-                    f"  Fasalein: {crops or '?'}\n"
+                    f"  Fasalein: {crop_count} crops\n"
                     f"  Joined: {joined or '?'}\n"
                 )
-            msg = "\n".join(lines)
-            send(chat_id, msg[:4000])
+            send(chat_id, "\n".join(lines)[:4000])
         except Exception as e:
             send(chat_id, f"Users error: {e}")
         return True
 
+    # /today
     if text_lower == "/today":
         try:
             conn = get_conn()
             cur  = conn.cursor()
             cur.execute("""
-                SELECT market, COUNT(*) as cnt
-                FROM prices
-                WHERE fetch_date = %s
-                AND is_fallback = 0
+                SELECT market, COUNT(*) FROM prices
+                WHERE fetch_date = %s AND is_fallback = 0
                 GROUP BY market ORDER BY market
             """, (today_str,))
             rows = cur.fetchall()
@@ -454,12 +463,12 @@ def handle_admin(chat_id, text_lower):
 
             if not rows:
                 send(chat_id,
-                    f"Aaj ({today_str}) ka fresh data nahi aaya.\n"
-                    f"main.py run karein."
+                    f"Aaj ({today_str}) fresh data nahi aaya.\n"
+                    f"/bhav command se fetch karo."
                 )
                 return True
 
-            lines = [f"TODAY ({today_str})\n{len(rows)} mandis\n"]
+            lines = [f"Today ({today_str}) -- {len(rows)} mandis\n"]
             for r in rows:
                 lines.append(f"  {r[0]}: {r[1]} crops")
             send(chat_id, "\n".join(lines)[:4000])
@@ -467,12 +476,116 @@ def handle_admin(chat_id, text_lower):
             send(chat_id, f"Today error: {e}")
         return True
 
+    # /bhav -- fetch + send to all subscribers NOW
     if text_lower == "/bhav":
         send(chat_id,
-            "Sabhi subscribers ko abhi bhav bhej raha hoon...\n"
-            "Ek minute ruko."
+            "Pipeline shuru ho rahi hai...\n"
+            "Data fetch karke sabko bhav bhejunga.\n"
+            "2-3 minute lagenge."
         )
-        threading.Thread(target=run_daily_pipeline).start()
+        threading.Thread(
+            target=run_daily_pipeline, daemon=True
+        ).start()
+        return True
+
+    # /health -- system health check
+    if text_lower == "/health":
+        try:
+            report = ["SYSTEM HEALTH CHECK\n" + "="*25 + "\n"]
+
+            # 1. DB connection
+            try:
+                conn = get_conn()
+                cur  = conn.cursor()
+                cur.execute("SELECT 1")
+                cur.close()
+                conn.close()
+                report.append("DB: OK (Supabase connected)")
+            except Exception as e:
+                report.append(f"DB: FAIL -- {e}")
+
+            # 2. subscribers count
+            try:
+                subs = get_active_subscribers()
+                report.append(f"Subscribers: {len(subs)} active")
+            except Exception as e:
+                report.append(f"Subscribers: FAIL -- {e}")
+
+            # 3. today's price data
+            try:
+                conn = get_conn()
+                cur  = conn.cursor()
+                cur.execute("""
+                    SELECT COUNT(*), MAX(fetch_date)
+                    FROM prices
+                """)
+                row = cur.fetchone()
+                cur.execute("""
+                    SELECT COUNT(*) FROM prices
+                    WHERE fetch_date = %s
+                """, (today_str,))
+                today_count = cur.fetchone()[0]
+                cur.close()
+                conn.close()
+                report.append(
+                    f"Price DB: {row[0]} total records\n"
+                    f"  Latest date: {row[1]}\n"
+                    f"  Today ({today_str}): {today_count} records"
+                )
+            except Exception as e:
+                report.append(f"Price DB: FAIL -- {e}")
+
+            # 4. Agmarknet API
+            try:
+                r = requests.get(
+                    "https://data.gov.in/resource/"
+                    "9ef84268-d588-465a-a308-a864a43d0070"
+                    f"?api-key={ENV.get('DATA_GOV_API_KEY','')}"
+                    "&format=json&limit=1",
+                    timeout=10
+                )
+                if r.status_code == 200:
+                    report.append("Agmarknet API: OK")
+                else:
+                    report.append(
+                        f"Agmarknet API: HTTP {r.status_code}"
+                    )
+            except Exception as e:
+                report.append(f"Agmarknet API: FAIL -- {e}")
+
+            # 5. Anthropic API
+            try:
+                r = requests.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": ENV.get("ANTHROPIC_API_KEY",""),
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json={
+                        "model": "claude-haiku-4-5-20251001",
+                        "max_tokens": 10,
+                        "messages": [{"role": "user",
+                                      "content": "say ok"}]
+                    },
+                    timeout=10
+                )
+                if r.status_code == 200:
+                    report.append("Anthropic API: OK")
+                else:
+                    report.append(
+                        f"Anthropic API: HTTP {r.status_code}"
+                    )
+            except Exception as e:
+                report.append(f"Anthropic API: FAIL -- {e}")
+
+            # 6. Scheduler status
+            report.append("Scheduler: 6:30 AM IST daily")
+
+            send(chat_id, "\n".join(report))
+
+        except Exception as e:
+            send(chat_id, f"Health check error: {e}")
         return True
 
     return False
@@ -486,33 +599,32 @@ def handle_registration_step(chat_id, text_clean, session,
     if text_lower in BAND_TRIGGERS + HELP_TRIGGERS:
         return False
 
-    # step 1 -- naam
+    # naam
     if step == "awaiting_name":
         if not is_valid_name(text_clean):
             send(chat_id,
-                "Apna naam batayein ji.\n"
+                "अपना नाम बताएं।\n"
                 "Jaise: Suresh Kumar\n\n"
-                "Sirf apna naam likhein:"
+                "Naam likhein:"
             )
             return True
         set_session(chat_id, step="awaiting_district",
                     name=text_clean)
         send(chat_id,
             f"Shukriya {text_clean} ji!\n\n"
-            f"Ab apna Jila (District) chunein.\n"
-            f"Number ya naam -- dono chalega:\n\n"
+            f"अपना जिला चुनें।\n"
+            f"Number bhejein:\n\n"
             f"{DISTRICT_LIST_TEXT}"
         )
         return True
 
-    # step 2 -- jila
+    # jila
     if step == "awaiting_district":
         resolved = resolve_district(text_clean)
         if not resolved:
             send(chat_id,
-                f"Samajh nahi aaya ji.\n\n"
-                f"Number ya naam bhejein:\n"
-                f"Jaise: 1 ya Karnal\n\n"
+                f"Samajh nahi aaya.\n"
+                f"Number bhejein (1-12):\n\n"
                 f"{DISTRICT_LIST_TEXT}"
             )
             return True
@@ -524,21 +636,20 @@ def handle_registration_step(chat_id, text_clean, session,
             crops=""
         )
         send(chat_id,
-            f"Jila: {district_name}\n\n"
-            f"Ab fasal ki category (Category) chunein.\n"
-            f"Number ya naam -- dono chalega:\n\n"
+            f"जिला: {district_name}\n\n"
+            f"अब फसल की category चुनें।\n"
+            f"Number bhejein:\n\n"
             f"{CATEGORY_LIST_TEXT}"
         )
         return True
 
-    # step 3 -- category (select = get ALL crops in that category)
+    # category -- select gets ALL crops in that category
     if step == "awaiting_category":
         resolved_cats = resolve_categories(text_clean)
         if not resolved_cats:
             send(chat_id,
-                f"Samajh nahi aaya ji.\n\n"
-                f"Number ya naam bhejein:\n"
-                f"Jaise: 1 ya Anaj\n\n"
+                f"Samajh nahi aaya.\n"
+                f"Number bhejein (1-4):\n\n"
                 f"{CATEGORY_LIST_TEXT}"
             )
             return True
@@ -549,7 +660,7 @@ def handle_registration_step(chat_id, text_clean, session,
         combined  = list(dict.fromkeys(exist_list + all_crops))
         crops_str = ",".join(combined)
 
-        cat_names = " + ".join(
+        cat_names = ", ".join(
             CROP_CATEGORIES[k][0]
             for k in resolved_cats if k in CROP_CATEGORIES
         )
@@ -561,18 +672,18 @@ def handle_registration_step(chat_id, text_clean, session,
         )
 
         send(chat_id,
-            f"Category add ki gayi: {cat_names}\n\n"
-            f"Kya aur category chahiye?\n\n"
-            f"1. Haan -- aur category add karo\n"
-            f"2. Nahi -- registration complete karo"
+            f"Category add hui: {cat_names}\n\n"
+            f"क्या और category चाहिए?\n\n"
+            f"1. हाँ -- aur category add karo\n"
+            f"2. नहीं -- registration complete karo"
         )
         return True
 
-    # step 4 -- aur category ya complete
+    # aur category ya complete
     if step == "awaiting_more_categories":
         want_more = text_clean == "1" or text_lower in [
             "haan", "ha", "yes", "aur", "haan ji", "haa",
-            "haan chahiye", "aur chahiye"
+            "1", "han", "haa", "chahiye"
         ]
         if want_more:
             set_session(chat_id, step="awaiting_category")
@@ -589,7 +700,7 @@ def handle_registration_step(chat_id, text_clean, session,
         if not crops:
             set_session(chat_id, step="awaiting_category")
             send(chat_id,
-                f"Koi category nahi chuni ji.\n\n"
+                f"Koi category nahi chuni.\n\n"
                 f"Category chunein:\n\n{CATEGORY_LIST_TEXT}"
             )
             return True
@@ -597,23 +708,31 @@ def handle_registration_step(chat_id, text_clean, session,
         if not is_valid_name(name):
             name = user_first_name or "Kisan"
 
+        print(f"[REG] Saving: name={name} district={district} "
+              f"crops={crops[:50]}")
         add_subscriber(chat_id, name, district, mandis, crops)
         clear_session(chat_id)
+
+        # verify it saved
+        saved = get_subscriber(str(chat_id))
+        if saved:
+            print(f"[REG] Verified saved: {saved['name']}")
+        else:
+            print(f"[REG] WARNING: subscriber not found after save!")
 
         crop_count = len([c for c in crops.split(",") if c])
         send(chat_id,
             f"Bahut badhiya {name} ji!\n\n"
-            f"Aapka profile (Profile) taiyaar ho gaya:\n"
-            f"Naam: {name}\n"
-            f"Jila: {district}\n"
-            f"Fasalein: {crop_count} fasalein selected\n\n"
+            f"Profile taiyaar ho gaya:\n"
+            f"नाम: {name}\n"
+            f"जिला: {district}\n"
+            f"फसलें: {crop_count} fasalein selected\n\n"
             f"Rozana subah 6:30 baje\n"
-            f"aapki fasal ka mandi bhav (Mandi Rate)\n"
-            f"automatically aayega.\n\n"
-            f"Abhi ka bhav (Rate): /mera_bhav\n"
-            f"Profile dekhein: /profile\n"
+            f"aapki fasal ka mandi bhav milega.\n\n"
+            f"Abhi ka bhav: /mera_bhav\n"
+            f"Profile: /profile\n"
             f"Madad: /help\n\n"
-            f"Kheti mein khushhaali rahe!"
+            f"खेती में खुशहाली रहे!"
         )
         return True
 
@@ -625,7 +744,7 @@ def handle_message(chat_id, text, user_first_name):
     text_lower = text_clean.lower().strip()
     session    = get_session(chat_id)
 
-    print(f"[HANDLE] chat_id={chat_id} "
+    print(f"[MSG] from={chat_id} ({user_first_name}) "
           f"step={session.get('step') if session else None} "
           f"text='{text_clean}'")
 
@@ -633,7 +752,7 @@ def handle_message(chat_id, text, user_first_name):
     if handle_admin(chat_id, text_lower):
         return
 
-    # priority 1 -- registration flow
+    # priority 1 -- registration
     if session and session.get("step") in REGISTRATION_STEPS:
         handled = handle_registration_step(
             chat_id, text_clean, session, user_first_name
@@ -641,55 +760,55 @@ def handle_message(chat_id, text, user_first_name):
         if handled:
             return
 
-    # priority 2 -- greeting / start
+    # priority 2 -- greeting
     if is_greeting(text_clean) or text_clean == "/start":
-        existing = get_subscriber(chat_id)
+        existing = get_subscriber(str(chat_id))
         if existing:
             send(chat_id,
                 f"Ram Ram {existing['name']} ji!\n\n"
-                f"Aapka profile:\n"
-                f"Jila: {existing['district']}\n"
-                f"Fasalein: {existing['crops']}\n\n"
-                f"/mera_bhav -- Abhi ka bhav\n"
-                f"/profile -- Apna profile\n"
-                f"/update -- Profile badlo\n"
-                f"/band -- Alerts band karo\n"
-                f"/help -- Madad"
+                f"आपका profile:\n"
+                f"जिला: {existing['district']}\n"
+                f"फसलें: {existing['crops']}\n\n"
+                f"/mera_bhav -- अभी का भाव\n"
+                f"/profile -- Profile देखें\n"
+                f"/update -- Profile बदलें\n"
+                f"/band -- Alerts band करें\n"
+                f"/help -- मदद"
             )
             return
         clear_session(chat_id)
         set_session(chat_id, step="awaiting_name")
         send(chat_id,
-            "Ram Ram! Haryana Mandi Bhav Bot mein\n"
-            "aapka swagat hai!\n\n"
-            "Yeh bot kya karta hai:\n"
-            "- Rozana subah 6:30 baje mandi bhav\n"
-            "- MSP se tulna -- bechein ya ruken\n"
-            "- Sirf aapki fasal ka data\n"
-            "- Bilkul muft (Free)\n\n"
-            "Pehle apna naam (Name) batayein:\n"
-            "Jaise: Suresh Kumar"
+            "राम राम! Haryana Mandi Bhav Bot में\n"
+            "आपका स्वागत है!\n\n"
+            "यह bot क्या करता है:\n"
+            "- रोज़ सुबह 6:30 बजे मंडी भाव\n"
+            "- MSP से तुलना\n"
+            "- सिर्फ आपकी फसल का data\n"
+            "- बिल्कुल मुफ्त\n\n"
+            "अपना नाम बताएं:\n"
+            "(Jaise: Suresh Kumar)"
         )
         return
 
     # priority 3 -- /profile
     if text_clean == "/profile":
-        sub = get_subscriber(chat_id)
+        sub = get_subscriber(str(chat_id))
         if sub:
-            crop_list = sub['crops'].replace(",", ", ")
+            crops = sub['crops'].replace(",", ", ")
             send(chat_id,
-                f"Aapka Profile\n\n"
-                f"Naam (Name): {sub['name']}\n"
-                f"Jila (District): {sub['district']}\n"
-                f"Fasalein (Crops): {crop_list}\n"
+                f"आपका Profile\n\n"
+                f"नाम: {sub['name']}\n"
+                f"जिला: {sub['district']}\n"
+                f"फसलें: {crops}\n"
                 f"Status: Active\n"
                 f"Joined: {sub['added_date']}\n\n"
                 f"/update se profile badlein"
             )
         else:
             send(chat_id,
-                "Aap registered nahi hain.\n"
-                "Register karne ke liye 'Hi' bhejein."
+                "आप registered नहीं हैं।\n"
+                "Register करें: 'Hi' भेजें।"
             )
         return
 
@@ -698,18 +817,19 @@ def handle_message(chat_id, text, user_first_name):
         sub = get_subscriber(str(chat_id))
         if not sub:
             send(chat_id,
-                "Aap abhi registered nahi hain.\n\n"
-                "Register karne ke liye\n"
-                "'Hi' ya 'Ram Ram' bhejein."
+                "आप registered नहीं हैं।\n\n"
+                "Register करने के लिए\n"
+                "'Hi' या 'Ram Ram' भेजें।"
             )
             return
         send(chat_id,
-            "Aapka bhav (Rate) nikal raha hai...\n"
-            "Thoda intezaar karein."
+            "आपका भाव निकाल रहे हैं...\n"
+            "थोड़ा इंतज़ार करें।"
         )
         threading.Thread(
-            target=send_instant_bhav,
-            args=(chat_id, sub)
+            target=_send_bhav_thread,
+            args=(chat_id, sub),
+            daemon=True
         ).start()
         return
 
@@ -718,9 +838,9 @@ def handle_message(chat_id, text, user_first_name):
         deactivate_subscriber(chat_id)
         clear_session(chat_id)
         send(chat_id,
-            "Aapke alerts band (Stop) kar diye gaye hain.\n\n"
-            "Dobara shuru karne ke liye 'Hi' bhejein.\n"
-            "Aapka data save hai."
+            "आपके alerts band कर दिए गए हैं।\n\n"
+            "दोबारा शुरू करने के लिए 'Hi' भेजें।\n"
+            "आपका data save है।"
         )
         return
 
@@ -729,54 +849,54 @@ def handle_message(chat_id, text, user_first_name):
         clear_session(chat_id)
         set_session(chat_id, step="awaiting_name")
         send(chat_id,
-            "Profile update karte hain.\n\n"
-            "Apna naam (Name) batayein:\n"
-            "(Same rakhna ho to wahi dobara likhein)"
+            "Profile update करते हैं।\n\n"
+            "अपना नाम बताएं:\n"
+            "(Same रखना हो तो वही लिखें)"
         )
         return
 
     # priority 7 -- /help
     if text_lower in HELP_TRIGGERS:
         send(chat_id,
-            "Haryana Mandi Bhav Bot -- Madad\n\n"
-            "Yeh bhejein:\n"
-            "Hi / Ram Ram -- Register ya profile dekhein\n"
-            "/mera_bhav -- Abhi ka bhav (Rate)\n"
-            "/profile -- Apna profile\n"
-            "/update -- Profile badlein\n"
-            "/band -- Alerts band karein\n"
-            "/help -- Yeh message\n\n"
-            "Rozana subah 6:30 baje automatically\n"
-            "aapki fasal ka mandi bhav milega."
+            "Haryana Mandi Bhav Bot -- मदद\n\n"
+            "यह भेजें:\n"
+            "Hi / Ram Ram -- Register या profile\n"
+            "/mera_bhav -- अभी का भाव\n"
+            "/profile -- Profile देखें\n"
+            "/update -- Profile बदलें\n"
+            "/band -- Alerts band करें\n"
+            "/help -- यह message\n\n"
+            "रोज़ सुबह 6:30 बजे automatically\n"
+            "आपकी फसल का मंडी भाव मिलेगा।"
         )
         return
 
     # fallback
     send(chat_id,
-        "Samajh nahi aaya ji.\n\n"
-        "Bhav ke liye: /mera_bhav\n"
-        "Madad ke liye: /help\n"
-        "Register ke liye: Hi"
+        "समझ नहीं आया।\n\n"
+        "भाव के लिए: /mera_bhav\n"
+        "मदद के लिए: /help\n"
+        "Register के लिए: Hi"
     )
 
 
-def send_instant_bhav(chat_id, subscriber):
+def _send_bhav_thread(chat_id, subscriber):
     try:
-        message = get_bhav_for_subscriber(subscriber)
-        if message:
-            send(chat_id, message)
+        msg = get_bhav_message(subscriber)
+        if msg:
+            send(chat_id, msg)
         else:
             send(chat_id,
-                "Abhi aapke jile ka data nahi aaya.\n"
-                "Thodi der mein dobara try karein.\n"
-                "Ya kal subah 6:30 baje automatically milega."
+                "अभी आपके जिले का data नहीं आया।\n"
+                "थोड़ी देर में /mera_bhav try करें।\n"
+                "या कल सुबह 6:30 बजे automatically मिलेगा।"
             )
     except Exception as e:
         send(chat_id,
-            "Data laane mein dikkat aayi.\n"
-            "Thodi der mein /mera_bhav try karein."
+            "Data लाने में दिक्कत आई।\n"
+            "थोड़ी देर में /mera_bhav try करें।"
         )
-        print(f"[BOT ERROR] {e}")
+        print(f"[BHAV THREAD ERROR] {e}")
         import traceback
         traceback.print_exc()
 
@@ -789,7 +909,7 @@ def keep_alive():
                 "https://mandi-bot.onrender.com/",
                 timeout=10
             )
-            print("[KEEPALIVE] Pinged")
+            print("[KEEPALIVE] OK")
         except Exception as e:
             print(f"[KEEPALIVE ERROR] {e}")
         time.sleep(600)
@@ -805,7 +925,7 @@ def webhook():
         chat_id    = message.get("chat", {}).get("id")
         text       = message.get("text", "")
         first_name = message.get("from", {}).get("first_name", "")
-        print(f"[WEBHOOK] from={first_name} text='{text}'")
+        print(f"[WEBHOOK] from={chat_id} ({first_name}) text='{text}'")
         if chat_id and text:
             try:
                 handle_message(chat_id, text, first_name)
@@ -814,11 +934,9 @@ def webhook():
                 import traceback
                 traceback.print_exc()
                 send(chat_id,
-                    "Kuch gadbad ho gayi ji.\n"
-                    "Thodi der mein dobara try karein."
+                    "कुछ गड़बड़ हो गई।\n"
+                    "थोड़ी देर में दोबारा try करें।"
                 )
-        else:
-            print("[WEBHOOK] No text -- skipping")
     except Exception as e:
         print(f"[WEBHOOK ERROR] {e}")
     return "ok"
@@ -831,11 +949,8 @@ def index():
 
 if __name__ == "__main__":
     init_db()
-
-    # keep-alive ping
     threading.Thread(target=keep_alive, daemon=True).start()
 
-    # daily scheduler -- 6:30 AM IST = 01:00 UTC
     scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
     scheduler.add_job(
         run_daily_pipeline,
@@ -845,8 +960,8 @@ if __name__ == "__main__":
         id="daily_mandi_bhav"
     )
     scheduler.start()
-    print("[SCHEDULER] Daily job set for 6:30 AM IST")
+    print("[SCHEDULER] 6:30 AM IST daily job set")
 
-    print("[BOT] Starting webhook server...")
+    print("[BOT] Starting...")
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

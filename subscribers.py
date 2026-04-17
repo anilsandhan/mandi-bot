@@ -7,20 +7,23 @@ def add_subscriber(name, telegram_id, district, mandis, crops):
     conn = get_conn()
     cur  = conn.cursor()
     try:
-        cur.execute("""
-            DELETE FROM subscribers WHERE telegram_id = %s
-        """, (str(telegram_id),))
+        cur.execute(
+            "DELETE FROM subscribers WHERE telegram_id = %s",
+            (str(telegram_id),)
+        )
         cur.execute("""
             INSERT INTO subscribers
             (name, telegram_id, district, mandis, crops,
              active, added_date)
             VALUES (%s,%s,%s,%s,%s,1,%s)
-        """, (name, str(telegram_id), district, mandis,
-              crops, str(date.today())))
+        """, (str(name), str(telegram_id), str(district),
+              str(mandis), str(crops), str(date.today())))
         conn.commit()
-        print(f"[SUBSCRIBERS] Saved: {name} | {district} | {crops}")
+        print(f"[DB] Saved subscriber: {name} | {district} | {crops}")
     except Exception as e:
-        print(f"[SUBSCRIBERS ERROR] {e}")
+        print(f"[DB ERROR] add_subscriber: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         cur.close()
         conn.close()
@@ -34,7 +37,8 @@ def get_subscriber(telegram_id):
             SELECT name, telegram_id, district, mandis,
                    crops, active, added_date
             FROM subscribers
-            WHERE telegram_id = %s AND active = 1
+            WHERE telegram_id = %s
+            AND active = 1
             ORDER BY id DESC
             LIMIT 1
         """, (str(telegram_id),))
@@ -42,8 +46,9 @@ def get_subscriber(telegram_id):
         cur.close()
         conn.close()
         if not row:
+            print(f"[DB] No subscriber found for {telegram_id}")
             return None
-        return {
+        result = {
             "name":        row[0],
             "telegram_id": row[1],
             "district":    row[2],
@@ -52,8 +57,12 @@ def get_subscriber(telegram_id):
             "active":      row[5],
             "added_date":  row[6],
         }
+        print(f"[DB] Found subscriber: {result['name']}")
+        return result
     except Exception as e:
-        print(f"[SUBSCRIBERS ERROR] get: {e}")
+        print(f"[DB ERROR] get_subscriber: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -83,9 +92,10 @@ def get_active_subscribers():
                 "active":      row[5],
                 "added_date":  row[6],
             })
+        print(f"[DB] Active subscribers: {len(result)}")
         return result
     except Exception as e:
-        print(f"[SUBSCRIBERS ERROR] get_active: {e}")
+        print(f"[DB ERROR] get_active_subscribers: {e}")
         return []
 
 
@@ -93,14 +103,14 @@ def deactivate_subscriber(telegram_id):
     conn = get_conn()
     cur  = conn.cursor()
     try:
-        cur.execute("""
-            UPDATE subscribers SET active = 0
-            WHERE telegram_id = %s
-        """, (str(telegram_id),))
+        cur.execute(
+            "UPDATE subscribers SET active = 0 WHERE telegram_id = %s",
+            (str(telegram_id),)
+        )
         conn.commit()
-        print(f"[SUBSCRIBERS] Deactivated: {telegram_id}")
+        print(f"[DB] Deactivated: {telegram_id}")
     except Exception as e:
-        print(f"[SUBSCRIBERS ERROR] deactivate: {e}")
+        print(f"[DB ERROR] deactivate: {e}")
     finally:
         cur.close()
         conn.close()
@@ -110,7 +120,7 @@ def list_subscribers():
     subs = get_active_subscribers()
     print(f"\n{len(subs)} active subscribers:")
     for s in subs:
-        print(f"  {s['name']:20} | {s['district']:12} | {s['crops']}")
+        print(f"  {s['name']:20} | {s['district']:12} | {s['crops'][:40]}")
 
 
 if __name__ == "__main__":

@@ -3,3 +3,4 @@ flask
 anthropic
 psycopg2-binary
 apscheduler 
+apscheduler 
